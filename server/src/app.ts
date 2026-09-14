@@ -1,6 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { apiV1Routes } from './routes/index.js';
@@ -22,6 +23,9 @@ export const createApp = (): Express => {
       allowedHeaders: ['Content-Type', 'Authorization'],
     })
   );
+
+  // Cookie parser
+  app.use(cookieParser());
 
   // Body parser
   app.use(express.json());

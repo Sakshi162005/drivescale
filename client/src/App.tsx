@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import {
   Cloud,
   Database,
@@ -11,7 +12,14 @@ import {
   Terminal,
   ShieldCheck,
   Cpu,
+  LogIn,
+  UserPlus,
+  LogOut,
+  HardDrive,
 } from 'lucide-react';
+import { useAuthStore } from './stores/auth.store.js';
+import { Login } from './pages/Login.js';
+import { Register } from './pages/Register.js';
 
 interface HealthResponse {
   success: boolean;
@@ -31,7 +39,8 @@ interface HealthResponse {
   };
 }
 
-export const App: React.FC = () => {
+const Dashboard: React.FC = () => {
+  const { user, isAuthenticated, logout } = useAuthStore();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
@@ -81,6 +90,14 @@ export const App: React.FC = () => {
     return `${secs}s`;
   };
 
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   const dbStatus = health?.data?.services?.database?.status || 'disconnected';
   const redisStatus = health?.data?.services?.redis?.status || 'disconnected';
   const overallStatus = errorMsg
@@ -100,21 +117,89 @@ export const App: React.FC = () => {
             <p className="brand-subtitle">Cloud File Storage Platform</p>
           </div>
         </div>
-        <div className="phase-pill">
-          <span className="phase-dot" />
-          <span>Phase 0 — Repository Initialization</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {isAuthenticated && user ? (
+            <div className="user-menu">
+              <div className="user-badge">
+                <div className="user-avatar">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="user-name">{user.name}</div>
+                  <div className="user-email">{user.email}</div>
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => logout()}
+                title="Sign Out"
+              >
+                <LogOut size={16} />
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <Link to="/login" className="btn btn-secondary">
+                <LogIn size={16} />
+                Sign In
+              </Link>
+              <Link to="/register" className="btn btn-primary">
+                <UserPlus size={16} />
+                Register
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* Hero Banner */}
+      {/* Hero / User Section */}
       <section className="hero-card">
-        <h2 className="hero-title">
-          Self-Hosted, Enterprise-Grade <span>File Storage Architecture</span>
-        </h2>
-        <p className="hero-desc">
-          DriveScale is engineered as a resilient modular monolith featuring large-file streaming,
-          chunked resumable uploads, MinIO object storage, distributed Redis caching, and BullMQ background workers.
-        </p>
+        {isAuthenticated && user ? (
+          <>
+            <h2 className="hero-title">
+              Welcome, <span>{user.name}</span>
+            </h2>
+            <p className="hero-desc">
+              Your DriveScale session is protected with short-lived JWT access tokens, Argon2id encryption,
+              and rotating refresh tokens.
+            </p>
+
+            <div style={{ maxWidth: '400px', marginTop: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <HardDrive size={14} /> Storage Usage
+                </span>
+                <span>{formatBytes(user.storageUsed || 0)} / {formatBytes(user.storageQuota || 10737418240)}</span>
+              </div>
+              <div className="storage-bar-wrapper">
+                <div className="storage-bar-bg">
+                  <div
+                    className="storage-bar-fill"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round(((user.storageUsed || 0) / (user.storageQuota || 10737418240)) * 100)
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="hero-title">
+              Self-Hosted, Enterprise-Grade <span>File Storage Architecture</span>
+            </h2>
+            <p className="hero-desc">
+              DriveScale features streaming chunked uploads, Argon2id authentication, JWT rotation,
+              MinIO object storage, and BullMQ background workers with zero AWS dependencies.
+            </p>
+          </>
+        )}
+
         <div className="actions-bar">
           <button
             className="btn btn-primary"
@@ -131,7 +216,7 @@ export const App: React.FC = () => {
             className="btn btn-secondary"
           >
             <Terminal size={16} />
-            Raw API Response
+            Raw Health JSON
           </a>
         </div>
       </section>
@@ -161,16 +246,16 @@ export const App: React.FC = () => {
               <span className="metric-value">/api/v1/health</span>
             </div>
             <div className="metric-row">
+              <span className="metric-label">Auth API</span>
+              <span className="metric-value">/api/v1/auth/*</span>
+            </div>
+            <div className="metric-row">
               <span className="metric-label">Uptime</span>
               <span className="metric-value">{formatUptime(health?.data?.uptime)}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Latency</span>
               <span className="metric-value">{latency !== null ? `${latency} ms` : '—'}</span>
-            </div>
-            <div className="metric-row">
-              <span className="metric-label">Version</span>
-              <span className="metric-value">{health?.data?.version || '0.1.0'}</span>
             </div>
           </div>
 
@@ -190,8 +275,8 @@ export const App: React.FC = () => {
             </div>
 
             <div className="metric-row">
-              <span className="metric-label">Role</span>
-              <span className="metric-value">Metadata Store</span>
+              <span className="metric-label">Collections</span>
+              <span className="metric-value">Users, RefreshTokens</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Driver</span>
@@ -253,26 +338,26 @@ export const App: React.FC = () => {
           Architecture Phase Roadmap
         </h3>
         <div className="roadmap-grid">
-          <div className="phase-item active">
+          <div className="phase-item">
             <div>
               <p className="phase-item-title">Phase 0: Repository Init</p>
               <p className="phase-item-sub">Monorepo, Docker, Health API</p>
             </div>
-            <span className="badge-tag active">Verified</span>
+            <span className="badge-tag active">Complete</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 1: Authentication</p>
-              <p className="phase-item-sub">JWT, Argon2, Refresh Rotation</p>
+              <p className="phase-item-sub">JWT, Argon2id, Refresh Rotation</p>
             </div>
-            <span className="badge-tag next">Upcoming</span>
+            <span className="badge-tag active">Implemented</span>
           </div>
           <div className="phase-item">
             <div>
               <p className="phase-item-title">Phase 2: Folder System</p>
               <p className="phase-item-sub">Hierarchical tree & breadcrumbs</p>
             </div>
-            <span className="badge-tag upcoming">Planned</span>
+            <span className="badge-tag next">Upcoming</span>
           </div>
           <div className="phase-item">
             <div>
@@ -310,5 +395,23 @@ export const App: React.FC = () => {
         </div>
       </footer>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  const { initAuth } = useAuthStore();
+
+  useEffect(() => {
+    initAuth();
+  }, [initAuth]);
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
