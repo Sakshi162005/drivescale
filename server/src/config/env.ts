@@ -17,6 +17,10 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   CLIENT_URL: z.string().default('http://localhost:5173'),
   LOG_LEVEL: z.string().optional().default('info'),
+  JWT_ACCESS_SECRET: z.string().default('drivescale-development-access-secret-32-chars-min!'),
+  JWT_REFRESH_SECRET: z.string().default('drivescale-development-refresh-secret-32-chars-min!'),
+  ACCESS_TOKEN_EXPIRES_IN: z.string().default('15m'),
+  REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
 });
 
 const parseEnv = () => {

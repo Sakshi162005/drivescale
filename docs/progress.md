@@ -4,7 +4,7 @@
 Status: COMPLETE
 
 ## Phase 1 — Authentication
-Status: NOT STARTED
+Status: COMPLETE
 
 ## Phase 2 — Folder Management
 Status: NOT STARTED
