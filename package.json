@@ -1,0 +1,30 @@
+{
+  "name": "drivescale",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DriveScale — Self-hosted cloud file storage platform",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:client": "npm run dev --workspace=client",
+    "dev:server": "npm run dev --workspace=server",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "keywords": [
+    "cloud-storage",
+    "file-storage",
+    "monorepo",
+    "react",
+    "express",
+    "mongodb",
+    "redis"
+  ],
+  "author": "",
+  "license": "MIT"
+}
