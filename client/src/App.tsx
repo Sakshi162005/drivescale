@@ -16,10 +16,12 @@ import {
   UserPlus,
   LogOut,
   HardDrive,
+  Folder as FolderIcon,
 } from 'lucide-react';
 import { useAuthStore } from './stores/auth.store.js';
 import { Login } from './pages/Login.js';
 import { Register } from './pages/Register.js';
+import { Drive } from './pages/Drive.js';
 
 interface HealthResponse {
   success: boolean;
@@ -121,6 +123,10 @@ const Dashboard: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           {isAuthenticated && user ? (
             <div className="user-menu">
+              <Link to="/drive" className="btn btn-primary" style={{ padding: '0.45rem 0.9rem', fontSize: '0.8125rem' }}>
+                <FolderIcon size={15} />
+                <span>My Drive</span>
+              </Link>
               <div className="user-badge">
                 <div className="user-avatar">
                   {user.name.charAt(0).toUpperCase()}
@@ -201,8 +207,14 @@ const Dashboard: React.FC = () => {
         )}
 
         <div className="actions-bar">
+          {isAuthenticated && (
+            <Link to="/drive" className="btn btn-primary">
+              <FolderIcon size={16} />
+              Open My Drive
+            </Link>
+          )}
           <button
-            className="btn btn-primary"
+            className={isAuthenticated ? 'btn btn-secondary' : 'btn btn-primary'}
             onClick={fetchHealth}
             disabled={loading}
           >
@@ -352,19 +364,19 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 2: Folder System</p>
               <p className="phase-item-sub">Hierarchical tree & breadcrumbs</p>
             </div>
-            <span className="badge-tag next">Upcoming</span>
+            <span className="badge-tag active">Implemented</span>
           </div>
           <div className="phase-item">
             <div>
               <p className="phase-item-title">Phase 3: File Storage</p>
               <p className="phase-item-sub">Streamed uploads & downloads</p>
             </div>
-            <span className="badge-tag upcoming">Planned</span>
+            <span className="badge-tag next">Upcoming</span>
           </div>
           <div className="phase-item">
             <div>
@@ -409,6 +421,8 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/drive" element={<Drive />} />
+        <Route path="/drive/:folderId" element={<Drive />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
       </Routes>

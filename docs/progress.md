@@ -7,7 +7,7 @@ Status: COMPLETE
 Status: COMPLETE
 
 ## Phase 2 — Folder Management
-Status: NOT STARTED
+Status: COMPLETE
 
 ## Phase 3 — Basic File Storage
 Status: NOT STARTED
