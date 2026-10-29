@@ -165,4 +165,130 @@ export class LocalStorageService implements IStorageService {
       throw error;
     }
   }
+
+  /**
+   * Validates and returns the path to a session chunk file
+   */
+  private getChunkPath(uploadId: string, chunkNumber: number): string {
+    if (!uploadId || typeof uploadId !== 'string' || uploadId.includes('..') || uploadId.includes('\0')) {
+      throw new BadRequestError('Invalid upload session ID for chunk storage', 'INVALID_UPLOAD_ID');
+    }
+    return path.join(this.baseDir, 'chunks', uploadId, `chunk_${chunkNumber}`);
+  }
+
+  /**
+   * Saves an incoming chunk stream for a given upload session
+   */
+  async saveChunk(uploadId: string, chunkNumber: number, stream: NodeJS.ReadableStream): Promise<StorageUploadResult> {
+    const chunkPath = this.getChunkPath(uploadId, chunkNumber);
+    const chunkDir = path.dirname(chunkPath);
+
+    await fs.promises.mkdir(chunkDir, { recursive: true });
+
+    // Write chunk to a temporary file first, then atomically rename to avoid partial writes
+    const tempChunkPath = `${chunkPath}.tmp_${Date.now()}`;
+    const writeStream = fs.createWriteStream(tempChunkPath);
+    const hash = crypto.createHash('sha256');
+    let size = 0;
+
+    const inspector = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.length;
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+
+    try {
+      await pipeline(stream, inspector, writeStream);
+      await fs.promises.rename(tempChunkPath, chunkPath);
+      const checksum = hash.digest('hex');
+      return { size, checksum };
+    } catch (error) {
+      try {
+        await fs.promises.unlink(tempChunkPath);
+      } catch {
+        // Ignore cleanup error
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Deletes all temporary chunks for an upload session
+   */
+  async deleteChunks(uploadId: string): Promise<void> {
+    if (!uploadId || typeof uploadId !== 'string' || uploadId.includes('..') || uploadId.includes('\0')) {
+      return;
+    }
+    const chunkDir = path.join(this.baseDir, 'chunks', uploadId);
+    try {
+      await fs.promises.rm(chunkDir, { recursive: true, force: true });
+    } catch {
+      // Ignore directory removal errors
+    }
+  }
+
+  /**
+   * Assembles all chunks in numerical order into targetKey using Node.js streams
+   */
+  async assembleChunks(uploadId: string, totalChunks: number, targetKey: string): Promise<StorageUploadResult> {
+    const targetPath = this.resolvePath(targetKey);
+    const targetDir = path.dirname(targetPath);
+
+    await fs.promises.mkdir(targetDir, { recursive: true });
+
+    const tempTargetPath = `${targetPath}.assembling_${Date.now()}`;
+    const writeStream = fs.createWriteStream(tempTargetPath);
+    const hash = crypto.createHash('sha256');
+    let totalSize = 0;
+
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = this.getChunkPath(uploadId, i);
+        try {
+          await fs.promises.access(chunkPath, fs.constants.R_OK);
+        } catch {
+          throw new NotFoundError(`Missing chunk ${i} during assembly`, 'MISSING_CHUNK');
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          const readStream = fs.createReadStream(chunkPath);
+          readStream.on('data', (chunk: Buffer | string) => {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            totalSize += buf.length;
+            hash.update(buf);
+            const canContinue = writeStream.write(buf);
+            if (!canContinue) {
+              readStream.pause();
+              writeStream.once('drain', () => readStream.resume());
+            }
+          });
+          readStream.on('end', () => resolve());
+          readStream.on('error', (err) => reject(err));
+        });
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        writeStream.end(() => resolve());
+        writeStream.on('error', reject);
+      });
+
+      // Atomically replace targetPath with assembled file
+      await fs.promises.rename(tempTargetPath, targetPath);
+
+      // Clean up temporary chunks
+      await this.deleteChunks(uploadId);
+
+      const checksum = hash.digest('hex');
+      return { size: totalSize, checksum };
+    } catch (err) {
+      try {
+        await fs.promises.unlink(tempTargetPath);
+      } catch {
+        // Ignore
+      }
+      throw err;
+    }
+  }
 }

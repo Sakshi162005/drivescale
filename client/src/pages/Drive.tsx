@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { folderService } from '../services/folder.service.js';
 import { fileService } from '../services/file.service.js';
+import { uploadService } from '../services/upload.service.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { Folder, BreadcrumbItem } from '../types/folder.types.js';
 import { FileItem } from '../types/file.types.js';
@@ -56,6 +57,15 @@ export const Drive: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [chunkProgress, setChunkProgress] = useState<{
+    fileName: string;
+    uploadedChunks: number;
+    totalChunks: number;
+    percent: number;
+    uploadedBytes: number;
+    totalBytes: number;
+    activeConcurrency: number;
+  } | null>(null);
 
   // Folder modals state
   const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
@@ -163,17 +173,30 @@ export const Drive: React.FC = () => {
     setUploadLoading(true);
     setUploadError(null);
     try {
-      const res = await fileService.uploadFile(selectedFile, activeFolderId);
-      if (res.success) {
-        // Refresh folder files and user storage
-        await Promise.all([loadFolderData(), initAuth()]);
+      if (selectedFile.size >= 1024 * 1024) {
+        // Files >= 1MB use chunked streaming with 3 concurrent workers
+        await uploadService.uploadFileChunked(selectedFile, activeFolderId, {
+          concurrency: 3,
+          onProgress: (p) => {
+            setChunkProgress({
+              fileName: selectedFile.name,
+              ...p,
+            });
+          },
+        });
       } else {
-        setUploadError(res.error?.message || 'Failed to upload file');
+        const res = await fileService.uploadFile(selectedFile, activeFolderId);
+        if (!res.success) {
+          throw new Error(res.error?.message || 'Failed to upload file');
+        }
       }
+      // Refresh folder files and user storage
+      await Promise.all([loadFolderData(), initAuth()]);
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploadLoading(false);
+      setChunkProgress(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -536,6 +559,41 @@ export const Drive: React.FC = () => {
           <div className="auth-alert" style={{ marginBottom: '1.5rem' }}>
             <AlertCircle size={18} />
             <span>{error}</span>
+          </div>
+        )}
+
+        {chunkProgress && (
+          <div
+            style={{
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Loader2 size={16} className="animate-spin" color="#6366F1" />
+                <span style={{ fontWeight: 600 }}>Chunked Uploading: {chunkProgress.fileName}</span>
+              </div>
+              <span style={{ color: '#818CF8', fontWeight: 600 }}>{chunkProgress.percent}%</span>
+            </div>
+            <div style={{ background: 'rgba(255, 255, 255, 0.1)', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  background: '#6366F1',
+                  height: '100%',
+                  width: `${chunkProgress.percent}%`,
+                  transition: 'width 0.2s ease',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+              <span>Chunks: {chunkProgress.uploadedChunks} / {chunkProgress.totalChunks}</span>
+              <span>Concurrency: {chunkProgress.activeConcurrency} parallel streams</span>
+              <span>{formatBytes(chunkProgress.uploadedBytes)} / {formatBytes(chunkProgress.totalBytes)}</span>
+            </div>
           </div>
         )}
 
