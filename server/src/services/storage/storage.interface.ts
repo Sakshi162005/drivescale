@@ -42,9 +42,20 @@ export interface IStorageService {
   getMetadata(key: string): Promise<StorageMetadata>;
 
   /**
-   * Saves a chunk stream for an upload session
+   * Saves a chunk stream for an upload session.
+   * If expectedChecksum is specified and doesn't match, throws ConflictError without replacing stored chunk.
    */
-  saveChunk(uploadId: string, chunkNumber: number, stream: NodeJS.ReadableStream): Promise<StorageUploadResult>;
+  saveChunk(
+    uploadId: string,
+    chunkNumber: number,
+    stream: NodeJS.ReadableStream,
+    expectedChecksum?: string
+  ): Promise<StorageUploadResult>;
+
+  /**
+   * Checks if a specific chunk file physically exists in storage and is readable
+   */
+  chunkExists(uploadId: string, chunkNumber: number): Promise<boolean>;
 
   /**
    * Deletes all temporary chunks for an upload session

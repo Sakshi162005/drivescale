@@ -23,6 +23,22 @@ export interface ChunkUploadResult {
   totalChunks: number;
 }
 
+export interface UploadStatusResult {
+  uploadId: string;
+  fileName: string;
+  totalSize: number;
+  chunkSize: number;
+  totalChunks: number;
+  uploadedChunks: number[];
+  missingChunks: number[];
+  status: string;
+  expiresAt: Date;
+  canAcceptChunks: boolean;
+  isAssembling: boolean;
+  isCompleted: boolean;
+  fileId?: string;
+}
+
 export class UploadService {
   private readonly storage: IStorageService;
 
@@ -156,6 +172,10 @@ export class UploadService {
       drainAndThrow(new BadRequestError('Upload session has already been completed', 'SESSION_ALREADY_COMPLETED'));
     }
 
+    if (session!.status === 'ASSEMBLING') {
+      drainAndThrow(new ConflictError('Upload session is currently assembling', 'SESSION_ASSEMBLING'));
+    }
+
     if (session!.status === 'CANCELLED' || session!.status === 'FAILED') {
       drainAndThrow(new BadRequestError(`Cannot upload chunks to a ${session!.status.toLowerCase()} session`, 'INVALID_SESSION_STATE'));
     }
@@ -185,8 +205,16 @@ export class UploadService {
       expectedSize = session!.chunkSize;
     }
 
-    // Save chunk to storage
-    const { size, checksum } = await this.storage.saveChunk(uploadId, chunkNumber, stream);
+    // Check if chunk was previously uploaded
+    const existingChunk = session!.uploadedChunks.find((c) => c.chunkNumber === chunkNumber);
+
+    // Save chunk to storage, validating against previous checksum if duplicate
+    const { size, checksum } = await this.storage.saveChunk(
+      uploadId,
+      chunkNumber,
+      stream,
+      existingChunk?.checksum
+    );
 
     if (size !== expectedSize) {
       throw new BadRequestError(
@@ -196,7 +224,6 @@ export class UploadService {
     }
 
     // Check duplicate chunk
-    const existingChunk = session!.uploadedChunks.find((c) => c.chunkNumber === chunkNumber);
     if (existingChunk) {
       if (existingChunk.checksum === checksum) {
         logger.info({ uploadId, chunkNumber }, 'Duplicate identical chunk received (idempotent)');
@@ -296,19 +323,32 @@ export class UploadService {
       throw new ConflictError('Concurrent completion in progress or invalid state', 'CONCURRENT_COMPLETION');
     }
 
-    // Check all chunks exist
+    // Check all chunks exist in DB and physically on storage
     const uploadedSet = new Set(updatedSession.uploadedChunks.map((c) => c.chunkNumber));
     const missingChunks: number[] = [];
 
     for (let i = 0; i < updatedSession.totalChunks; i++) {
       if (!uploadedSet.has(i)) {
         missingChunks.push(i);
+      } else {
+        const physicallyExists = await this.storage.chunkExists(uploadId, i);
+        if (!physicallyExists) {
+          missingChunks.push(i);
+        }
       }
     }
 
     if (missingChunks.length > 0) {
-      // Revert status to UPLOADING so missing chunks can still be supplied
-      await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'UPLOADING' } });
+      // Revert status to UPLOADING and purge any missing chunks from DB record
+      const verifiedUploaded = updatedSession.uploadedChunks.filter(
+        (c) => !missingChunks.includes(c.chunkNumber)
+      );
+      await UploadSession.findByIdAndUpdate(uploadId, {
+        $set: {
+          status: 'UPLOADING',
+          uploadedChunks: verifiedUploaded,
+        },
+      });
       throw new BadRequestError(
         `Cannot complete upload: missing chunks: [${missingChunks.join(', ')}]`,
         'MISSING_CHUNKS'
@@ -368,9 +408,9 @@ export class UploadService {
   }
 
   /**
-   * Retrieves status of an upload session
+   * Retrieves status of an upload session, verifying physical chunk integrity
    */
-  async getUploadStatus(userId: string, uploadId: string): Promise<IUploadSession> {
+  async getUploadStatus(userId: string, uploadId: string): Promise<UploadStatusResult> {
     if (!mongoose.Types.ObjectId.isValid(uploadId)) {
       throw new BadRequestError('Invalid upload session ID', 'INVALID_UPLOAD_ID');
     }
@@ -384,11 +424,87 @@ export class UploadService {
       throw new UnauthorizedError('You do not have permission to access this upload session', 'FORBIDDEN');
     }
 
-    return session;
+    // Check expiration
+    const now = new Date();
+    if (session.status !== 'COMPLETED' && session.status !== 'CANCELLED' && now > session.expiresAt) {
+      if (session.status !== 'EXPIRED') {
+        session.status = 'EXPIRED';
+        await session.save();
+      }
+    }
+
+    // If session is still in progress, verify physical existence of all recorded chunks
+    let verifiedUploadedChunks = session.uploadedChunks;
+    if (session.status === 'PENDING' || session.status === 'UPLOADING') {
+      const physicallyExisting: typeof session.uploadedChunks = [];
+      let hadMissingPhysical = false;
+
+      for (const chunk of session.uploadedChunks) {
+        const exists = await this.storage.chunkExists(uploadId, chunk.chunkNumber);
+        if (exists) {
+          physicallyExisting.push(chunk);
+        } else {
+          logger.warn(
+            { uploadId, chunkNumber: chunk.chunkNumber },
+            'Recorded chunk missing from storage; dropping from session record'
+          );
+          hadMissingPhysical = true;
+        }
+      }
+
+      if (hadMissingPhysical) {
+        session.uploadedChunks = physicallyExisting;
+        if (physicallyExisting.length === 0 && session.status === 'UPLOADING') {
+          session.status = 'PENDING';
+        }
+        await session.save();
+        verifiedUploadedChunks = physicallyExisting;
+      }
+    }
+
+    const uploadedChunkNumbers = verifiedUploadedChunks.map((c) => c.chunkNumber).sort((a, b) => a - b);
+    const uploadedSet = new Set(uploadedChunkNumbers);
+
+    const missingChunks: number[] = [];
+    if (session.status !== 'COMPLETED') {
+      for (let i = 0; i < session.totalChunks; i++) {
+        if (!uploadedSet.has(i)) {
+          missingChunks.push(i);
+        }
+      }
+    }
+
+    const canAcceptChunks =
+      (session.status === 'PENDING' || session.status === 'UPLOADING') &&
+      now <= session.expiresAt;
+
+    let fileId: string | undefined;
+    if (session.status === 'COMPLETED') {
+      const file = await File.findOne({ storageKey: session.storageKey, isDeleted: false });
+      if (file) {
+        fileId = file._id.toString();
+      }
+    }
+
+    return {
+      uploadId: session._id.toString(),
+      fileName: session.fileName,
+      totalSize: session.totalSize,
+      chunkSize: session.chunkSize,
+      totalChunks: session.totalChunks,
+      uploadedChunks: uploadedChunkNumbers,
+      missingChunks,
+      status: session.status,
+      expiresAt: session.expiresAt,
+      canAcceptChunks,
+      isAssembling: session.status === 'ASSEMBLING',
+      isCompleted: session.status === 'COMPLETED',
+      fileId,
+    };
   }
 
   /**
-   * Cancels an upload session and cleans up stored chunks
+   * Cancels an upload session and cleans up stored chunks safely with race guards
    */
   async cancelUpload(userId: string, uploadId: string): Promise<void> {
     if (!mongoose.Types.ObjectId.isValid(uploadId)) {
@@ -402,6 +518,18 @@ export class UploadService {
 
     if (session.userId.toString() !== userId) {
       throw new UnauthorizedError('You do not have permission to cancel this upload session', 'FORBIDDEN');
+    }
+
+    if (session.status === 'COMPLETED') {
+      throw new BadRequestError('Upload session has already been completed', 'SESSION_ALREADY_COMPLETED');
+    }
+
+    if (session.status === 'ASSEMBLING') {
+      throw new ConflictError('Upload session is currently assembling and cannot be cancelled', 'SESSION_ASSEMBLING');
+    }
+
+    if (session.status === 'CANCELLED') {
+      return; // Idempotent
     }
 
     session.status = 'CANCELLED';

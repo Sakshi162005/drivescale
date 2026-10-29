@@ -71,7 +71,35 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 5 — Resumable Uploads
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Storage Physical Integrity Verification**: Added `chunkExists(uploadId, chunkNumber)` to `IStorageService` and implemented it in `LocalStorageService`. The upload status endpoint verifies physical chunk files on disk before reporting them as uploaded, automatically recovering from storage loss or orphan chunk states.
+- **Dynamic Missing Chunk Calculation**: `GET /api/v1/uploads/:uploadId/status` computes sorted `missingChunks` as $\{ i \in [0, \text{totalChunks}-1] \mid i \notin \text{verifiedChunks} \}$.
+- **Status API Enrichment**: `/status` returns `uploadId`, `fileName`, `totalSize`, `chunkSize`, `totalChunks`, `uploadedChunks`, `missingChunks`, `status`, `expiresAt`, `canAcceptChunks`, `isAssembling`, `isCompleted`, and `fileId`.
+- **Atomic Race & Safety Guards**:
+  - `cancelUpload` rejects cancellation of completed sessions (`400 SESSION_ALREADY_COMPLETED`) and assembling sessions (`409 SESSION_ASSEMBLING`).
+  - Concurrent complete requests are guarded by atomic transition from `PENDING`/`UPLOADING` to `ASSEMBLING`.
+  - Repeated `/complete` calls on completed uploads return the existing file idempotently.
+- **Duplicate & Conflict Handling**: Retrying an identical chunk returns 200 OK (`isDuplicate: true`) without re-writing or corrupting state. Uploading a chunk with conflicting content returns 409 Conflict (`DUPLICATE_CHUNK_CONFLICT`) while preserving the valid stored chunk on disk.
+- **Frontend Resume Manager**:
+  - Persists non-sensitive upload metadata (`uploadId`, `fileName`, `totalSize`, `folderId`, `createdAt`) in browser `localStorage` (never storing file bytes or binary handles).
+  - Implements `resumeUpload(uploadId, file, options)` which queries server status, uploads only missing chunks via a 3-worker concurrency pool, and applies exponential backoff retries (3 attempts).
+  - Added an "Incomplete Upload Found" notification banner in `Drive.tsx` with a single-click "Resume Upload" action and a "Dismiss" action.
+
+### Endpoints
+- `GET /api/v1/uploads/:uploadId/status`: Returns enriched upload status, verified uploaded chunks, and sorted missing chunks.
+- `PUT /api/v1/uploads/:uploadId/chunks/:chunkNumber`: Ingests chunk, acknowledges identical retries idempotently (200 OK), rejects conflicting checksums (409 Conflict), and rejects cancelled/expired sessions.
+- `POST /api/v1/uploads/:uploadId/complete`: Assembles missing-free uploads; idempotently returns existing file if already complete; rejects racing cancellations.
+- `DELETE /api/v1/uploads/:uploadId`: Safely cancels active sessions, deletes temporary chunks, and rejects cancelling completed/assembling uploads.
+
+### Verification
+- 15 automated unit and integration tests in `server/tests/resumable-upload.test.ts` verifying status calculation, out-of-order uploads, physical chunk validation, resume flow, retry idempotency, conflict detection, expiration, cancellation race guards, and cross-user authorization.
+- 18 existing chunked upload tests in `server/tests/upload.test.ts` pass without regressions.
+- Full workspace test suite: 95 passed tests across 7 test suites.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors.
+- ESLint (`npm run lint`) passed with 0 errors.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 6 — Redis
 Status: NOT STARTED

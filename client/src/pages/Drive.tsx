@@ -34,6 +34,7 @@ import { uploadService } from '../services/upload.service.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { Folder, BreadcrumbItem } from '../types/folder.types.js';
 import { FileItem } from '../types/file.types.js';
+import { ActiveUploadMetadata } from '../types/upload.types.js';
 
 export const Drive: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
@@ -66,6 +67,11 @@ export const Drive: React.FC = () => {
     totalBytes: number;
     activeConcurrency: number;
   } | null>(null);
+
+  // Resumable uploads state
+  const [activeUploads, setActiveUploads] = useState<ActiveUploadMetadata[]>([]);
+  const [resumeTarget, setResumeTarget] = useState<ActiveUploadMetadata | null>(null);
+  const resumeFileInputRef = useRef<HTMLInputElement>(null);
 
   // Folder modals state
   const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
@@ -147,11 +153,16 @@ export const Drive: React.FC = () => {
     }
   }, [activeFolderId]);
 
+  const refreshActiveUploads = useCallback(() => {
+    setActiveUploads(uploadService.getActiveUploads());
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated) {
       loadFolderData();
+      refreshActiveUploads();
     }
-  }, [isAuthenticated, loadFolderData]);
+  }, [isAuthenticated, loadFolderData, refreshActiveUploads]);
 
   // Load all user folders for move destination picker
   const loadAllFolders = async () => {
@@ -197,9 +208,70 @@ export const Drive: React.FC = () => {
     } finally {
       setUploadLoading(false);
       setChunkProgress(null);
+      refreshActiveUploads();
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  // Resumable upload handlers
+  const handleInitiateResume = (upload: ActiveUploadMetadata) => {
+    setResumeTarget(upload);
+    if (resumeFileInputRef.current) {
+      resumeFileInputRef.current.value = '';
+      resumeFileInputRef.current.click();
+    }
+  };
+
+  const handleResumeFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile || !resumeTarget) return;
+
+    if (selectedFile.name !== resumeTarget.fileName || selectedFile.size !== resumeTarget.totalSize) {
+      setUploadError(
+        `Selected file '${selectedFile.name}' (${selectedFile.size} bytes) does not match expected file '${resumeTarget.fileName}' (${resumeTarget.totalSize} bytes)`
+      );
+      setResumeTarget(null);
+      return;
+    }
+
+    setUploadLoading(true);
+    setUploadError(null);
+    try {
+      await uploadService.resumeUpload(resumeTarget.uploadId, selectedFile, {
+        concurrency: 3,
+        onProgress: (p) => {
+          setChunkProgress({
+            fileName: selectedFile.name,
+            ...p,
+          });
+        },
+      });
+
+      refreshActiveUploads();
+      await Promise.all([loadFolderData(), initAuth()]);
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to resume upload');
+    } finally {
+      setUploadLoading(false);
+      setChunkProgress(null);
+      setResumeTarget(null);
+      refreshActiveUploads();
+      if (resumeFileInputRef.current) {
+        resumeFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDismissResume = async (uploadId: string) => {
+    try {
+      await uploadService.cancelUpload(uploadId);
+    } catch {
+      // Best-effort cancel
+    } finally {
+      uploadService.removeActiveUpload(uploadId);
+      refreshActiveUploads();
     }
   };
 
@@ -526,6 +598,12 @@ export const Drive: React.FC = () => {
             style={{ display: 'none' }}
             onChange={handleFileUpload}
           />
+          <input
+            type="file"
+            ref={resumeFileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleResumeFileSelected}
+          />
 
           <button
             className="btn btn-primary"
@@ -555,6 +633,70 @@ export const Drive: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="drive-main">
+        {activeUploads.length > 0 && !uploadLoading && (
+          <div
+            style={{
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <AlertCircle size={20} color="#F59E0B" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#FDE68A' }}>
+                    Incomplete upload found: {activeUploads[0].fileName} ({formatBytes(activeUploads[0].totalSize)})
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    You can resume this upload without starting over. Select the original file to continue.
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => handleInitiateResume(activeUploads[0])}
+                  disabled={uploadLoading}
+                  style={{
+                    background: '#F59E0B',
+                    color: '#000',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '0.4rem 0.8rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                  }}
+                >
+                  <Upload size={14} />
+                  Resume Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDismissResume(activeUploads[0].uploadId)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: 'var(--text-muted)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '0.4rem 0.8rem',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="auth-alert" style={{ marginBottom: '1.5rem' }}>
             <AlertCircle size={18} />

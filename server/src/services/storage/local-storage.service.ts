@@ -8,7 +8,7 @@ import {
   StorageMetadata,
   StorageUploadResult,
 } from './storage.interface.js';
-import { BadRequestError, NotFoundError } from '../../utils/errors.js';
+import { BadRequestError, NotFoundError, ConflictError } from '../../utils/errors.js';
 import { logger } from '../../utils/logger.js';
 
 export class LocalStorageService implements IStorageService {
@@ -179,14 +179,19 @@ export class LocalStorageService implements IStorageService {
   /**
    * Saves an incoming chunk stream for a given upload session
    */
-  async saveChunk(uploadId: string, chunkNumber: number, stream: NodeJS.ReadableStream): Promise<StorageUploadResult> {
+  async saveChunk(
+    uploadId: string,
+    chunkNumber: number,
+    stream: NodeJS.ReadableStream,
+    expectedChecksum?: string
+  ): Promise<StorageUploadResult> {
     const chunkPath = this.getChunkPath(uploadId, chunkNumber);
     const chunkDir = path.dirname(chunkPath);
 
     await fs.promises.mkdir(chunkDir, { recursive: true });
 
     // Write chunk to a temporary file first, then atomically rename to avoid partial writes
-    const tempChunkPath = `${chunkPath}.tmp_${Date.now()}`;
+    const tempChunkPath = `${chunkPath}.tmp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const writeStream = fs.createWriteStream(tempChunkPath);
     const hash = crypto.createHash('sha256');
     let size = 0;
@@ -201,8 +206,30 @@ export class LocalStorageService implements IStorageService {
 
     try {
       await pipeline(stream, inspector, writeStream);
-      await fs.promises.rename(tempChunkPath, chunkPath);
       const checksum = hash.digest('hex');
+
+      if (expectedChecksum) {
+        if (expectedChecksum !== checksum) {
+          try {
+            await fs.promises.unlink(tempChunkPath);
+          } catch {
+            // Ignore
+          }
+          throw new ConflictError(
+            `Chunk ${chunkNumber} already uploaded with a different checksum`,
+            'DUPLICATE_CHUNK_CONFLICT'
+          );
+        }
+        // Duplicate identical chunk: clean up temp file and leave existing valid chunk
+        try {
+          await fs.promises.unlink(tempChunkPath);
+        } catch {
+          // Ignore
+        }
+        return { size, checksum };
+      }
+
+      await fs.promises.rename(tempChunkPath, chunkPath);
       return { size, checksum };
     } catch (error) {
       try {
@@ -211,6 +238,22 @@ export class LocalStorageService implements IStorageService {
         // Ignore cleanup error
       }
       throw error;
+    }
+  }
+
+  /**
+   * Checks if a specific chunk file physically exists on disk and is readable
+   */
+  async chunkExists(uploadId: string, chunkNumber: number): Promise<boolean> {
+    if (!uploadId || typeof uploadId !== 'string' || uploadId.includes('..') || uploadId.includes('\0')) {
+      return false;
+    }
+    try {
+      const chunkPath = this.getChunkPath(uploadId, chunkNumber);
+      await fs.promises.access(chunkPath, fs.constants.R_OK);
+      return true;
+    } catch {
+      return false;
     }
   }
 

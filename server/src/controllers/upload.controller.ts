@@ -83,8 +83,8 @@ export const completeUpload = asyncHandler(async (req: AuthenticatedRequest, res
 export const getUploadStatus = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userId = req.user!._id.toString();
   const uploadId = req.params['uploadId'] as string;
-  const session = await uploadService.getUploadStatus(userId, uploadId);
-  sendSuccess(res, { session }, 200);
+  const status = await uploadService.getUploadStatus(userId, uploadId);
+  sendSuccess(res, { session: status, ...status }, 200);
 });
 
 export const cancelUpload = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {

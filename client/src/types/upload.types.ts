@@ -41,3 +41,38 @@ export interface ChunkProgressCallback {
   }): void;
 }
 
+export interface UploadStatusResponse {
+  uploadId: string;
+  fileName: string;
+  totalSize: number;
+  chunkSize: number;
+  totalChunks: number;
+  uploadedChunks: number[];
+  missingChunks: number[];
+  status: 'PENDING' | 'UPLOADING' | 'ASSEMBLING' | 'COMPLETED' | 'FAILED' | 'EXPIRED' | 'CANCELLED';
+  expiresAt: string;
+  canAcceptChunks: boolean;
+  isAssembling: boolean;
+  isCompleted: boolean;
+  fileId?: string;
+  session?: UploadSession;
+}
+
+export interface ActiveUploadMetadata {
+  uploadId: string;
+  fileName: string;
+  totalSize: number;
+  chunkSize: number;
+  totalChunks: number;
+  folderId: string | null;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface ResumeUploadOptions {
+  concurrency?: number;
+  maxRetries?: number;
+  onProgress?: ChunkProgressCallback;
+  signal?: AbortSignal;
+}
+

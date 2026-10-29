@@ -37,8 +37,11 @@ describe('Phase 4 Chunked Uploads Test Suite', () => {
     vi.restoreAllMocks();
 
     // Route storageService calls to our isolated test LocalStorageService
-    vi.spyOn(storageService, 'saveChunk').mockImplementation((uploadId, chunkNum, stream) =>
-      localStorage.saveChunk(uploadId, chunkNum, stream)
+    vi.spyOn(storageService, 'saveChunk').mockImplementation((...args) =>
+      localStorage.saveChunk(...args)
+    );
+    vi.spyOn(storageService, 'chunkExists').mockImplementation((uploadId, chunkNum) =>
+      localStorage.chunkExists(uploadId, chunkNum)
     );
     vi.spyOn(storageService, 'deleteChunks').mockImplementation((uploadId) =>
       localStorage.deleteChunks(uploadId)
