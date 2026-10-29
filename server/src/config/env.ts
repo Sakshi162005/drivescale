@@ -15,6 +15,13 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(5000),
   MONGODB_URI: z.string().default('mongodb://localhost:27017/drivescale'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_CACHE_TTL: z.coerce.number().default(300), // 5 minutes default cache TTL
+  RATE_LIMIT_GENERAL_LIMIT: z.coerce.number().default(100), // 100 req/min
+  RATE_LIMIT_GENERAL_WINDOW_MS: z.coerce.number().default(60000), // 1 minute
+  RATE_LIMIT_AUTH_LIMIT: z.coerce.number().default(10), // 10 req/min for auth
+  RATE_LIMIT_AUTH_WINDOW_MS: z.coerce.number().default(60000),
+  RATE_LIMIT_UPLOAD_INIT_LIMIT: z.coerce.number().default(20), // 20 req/min for upload init
+  RATE_LIMIT_UPLOAD_INIT_WINDOW_MS: z.coerce.number().default(60000),
   CLIENT_URL: z.string().default('http://localhost:5173'),
   LOG_LEVEL: z.string().optional().default('info'),
   JWT_ACCESS_SECRET: z.string().default('drivescale-development-access-secret-32-chars-min!'),

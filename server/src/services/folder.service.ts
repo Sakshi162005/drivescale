@@ -1,6 +1,7 @@
 import mongoose, { Types } from 'mongoose';
 import { Folder, IFolder } from '../models/Folder.js';
 import { CreateFolderInput } from '../schemas/folder.schema.js';
+import { cacheService, CacheKeys } from './cache.service.js';
 import {
   BadRequestError,
   ConflictError,
@@ -62,13 +63,21 @@ export class FolderService {
 
     logger.info({ folderId: folder._id, ownerId }, 'Folder created successfully');
 
+    // Invalidate folder listing caches
+    await cacheService.del(CacheKeys.folderChildren(ownerId, input.parentId || 'root'));
+    await cacheService.del(CacheKeys.folderTree(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+
     return folder;
   }
 
   /**
-   * Retrieves a folder and its breadcrumb hierarchy
+   * Retrieves a folder and its breadcrumb hierarchy (cached for non-root folders)
    */
-  async getFolder(ownerId: string, folderId: string): Promise<{ folder: IFolder | { _id: string; name: string; parentId: null; isRoot: boolean }; breadcrumbs: BreadcrumbItem[] }> {
+  async getFolder(
+    ownerId: string,
+    folderId: string
+  ): Promise<{ folder: IFolder | { _id: string; name: string; parentId: null; isRoot: boolean }; breadcrumbs: BreadcrumbItem[] }> {
     if (folderId === 'root') {
       return {
         folder: {
@@ -85,6 +94,12 @@ export class FolderService {
       throw new BadRequestError('Invalid folder ID', 'INVALID_FOLDER_ID');
     }
 
+    const cacheKey = CacheKeys.folderDetail(ownerId, folderId);
+    const cached = await cacheService.get<{ folder: IFolder; breadcrumbs: BreadcrumbItem[] }>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const folder = await Folder.findById(folderId);
     if (!folder || folder.isDeleted) {
       throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
@@ -95,14 +110,22 @@ export class FolderService {
     }
 
     const breadcrumbs = await this.getBreadcrumbs(ownerId, folder);
+    const result = { folder, breadcrumbs };
 
-    return { folder, breadcrumbs };
+    await cacheService.set(cacheKey, result, 300);
+    return result;
   }
 
   /**
-   * Lists child folders for a given parent (or root)
+   * Lists child folders for a given parent (or root) with Redis caching
    */
   async getFolderChildren(ownerId: string, folderId: string): Promise<IFolder[]> {
+    const cacheKey = CacheKeys.folderChildren(ownerId, folderId);
+    const cached = await cacheService.get<IFolder[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     let normalizedParentId: Types.ObjectId | null = null;
 
     if (folderId !== 'root') {
@@ -128,11 +151,12 @@ export class FolderService {
       isDeleted: false,
     }).sort({ name: 1 });
 
+    await cacheService.set(cacheKey, children, 300);
     return children;
   }
 
   /**
-   * Renames a folder
+   * Renames a folder and invalidates affected cache entries
    */
   async renameFolder(ownerId: string, folderId: string, newName: string): Promise<IFolder> {
     if (!mongoose.Types.ObjectId.isValid(folderId)) {
@@ -173,6 +197,12 @@ export class FolderService {
 
     logger.info({ folderId: folder._id, newName }, 'Folder renamed successfully');
 
+    // Invalidate folder caches
+    await cacheService.del(CacheKeys.folderDetail(ownerId, folderId));
+    await cacheService.del(CacheKeys.folderChildren(ownerId, folder.parentId ? folder.parentId.toString() : 'root'));
+    await cacheService.del(CacheKeys.folderTree(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+
     return folder;
   }
 
@@ -207,6 +237,13 @@ export class FolderService {
       { folderId, totalDeleted: allIdsToDelete.length },
       'Folder and descendants deleted successfully'
     );
+
+    // Invalidate folder and file listing caches
+    await cacheService.del(CacheKeys.folderDetail(ownerId, folderId));
+    await cacheService.del(CacheKeys.folderChildren(ownerId, folder.parentId ? folder.parentId.toString() : 'root'));
+    await cacheService.del(CacheKeys.folderTree(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
   }
 
   /**
@@ -287,17 +324,33 @@ export class FolderService {
 
     logger.info({ folderId: folder._id, destination: normalizedTargetId }, 'Folder moved successfully');
 
+    // Invalidate folder caches
+    await cacheService.del(CacheKeys.folderDetail(ownerId, folderId));
+    await cacheService.del(CacheKeys.folderChildren(ownerId, currentParentStr || 'root'));
+    await cacheService.del(CacheKeys.folderChildren(ownerId, targetParentStr || 'root'));
+    await cacheService.del(CacheKeys.folderTree(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+
     return folder;
   }
 
   /**
-   * Returns all active folders for an owner (useful for folder selection UI)
+   * Returns all active folders for an owner (useful for folder selection UI) with Redis caching
    */
   async getAllFolders(ownerId: string): Promise<IFolder[]> {
-    return Folder.find({
+    const cacheKey = CacheKeys.folderTree(ownerId);
+    const cached = await cacheService.get<IFolder[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const folders = await Folder.find({
       ownerId: new Types.ObjectId(ownerId),
       isDeleted: false,
     }).sort({ name: 1 });
+
+    await cacheService.set(cacheKey, folders, 300);
+    return folders;
   }
 
   /**

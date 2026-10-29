@@ -5,6 +5,7 @@ import { Folder } from '../models/Folder.js';
 import { User } from '../models/User.js';
 import { storageService, IStorageService } from './storage/index.js';
 import { ListFilesQueryInput } from '../schemas/file.schema.js';
+import { cacheService, CacheKeys } from './cache.service.js';
 import {
   BadRequestError,
   ConflictError,
@@ -136,6 +137,11 @@ export class FileService {
       });
 
       logger.info({ fileId: file._id, ownerId, size, storageKey }, 'File uploaded successfully');
+
+      // Invalidate file listings and storage stats cache
+      await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+      await cacheService.del(CacheKeys.userStorageStats(ownerId));
+
       return file;
     } catch (dbError) {
       // Rollback storage file on database failure
@@ -146,12 +152,18 @@ export class FileService {
   }
 
   /**
-   * Retrieves paginated files for a user in a specific folder or across all folders
+   * Retrieves paginated files for a user in a specific folder or across all folders (with Redis cache)
    */
   async listFiles(ownerId: string, query: ListFilesQueryInput): Promise<PaginatedFilesResult> {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(100, Math.max(1, query.limit || 50));
     const skip = (page - 1) * limit;
+
+    const cacheKey = CacheKeys.fileList(ownerId, query.folderId || 'all', page, limit);
+    const cached = await cacheService.get<PaginatedFilesResult>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const filter: Record<string, unknown> = {
       ownerId: new Types.ObjectId(ownerId),
@@ -192,7 +204,7 @@ export class FileService {
 
     const totalPages = Math.ceil(total / limit) || 1;
 
-    return {
+    const result: PaginatedFilesResult = {
       files,
       pagination: {
         page,
@@ -203,14 +215,25 @@ export class FileService {
         hasPrevPage: page > 1,
       },
     };
+
+    // Cache file listing for 60 seconds
+    await cacheService.set(cacheKey, result, 60);
+
+    return result;
   }
 
   /**
-   * Retrieves file metadata with authorization check
+   * Retrieves file metadata with authorization check and Redis caching
    */
   async getFile(ownerId: string, fileId: string): Promise<IFile> {
     if (!mongoose.Types.ObjectId.isValid(fileId)) {
       throw new BadRequestError('Invalid file ID', 'INVALID_FILE_ID');
+    }
+
+    const cacheKey = CacheKeys.fileDetail(ownerId, fileId);
+    const cached = await cacheService.get<IFile>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const file = await File.findById(fileId);
@@ -222,6 +245,7 @@ export class FileService {
       throw new UnauthorizedError('You do not have permission to access this file', 'FORBIDDEN');
     }
 
+    await cacheService.set(cacheKey, file, 300);
     return file;
   }
 
@@ -235,7 +259,7 @@ export class FileService {
   }
 
   /**
-   * Renames a file
+   * Renames a file and invalidates file caches
    */
   async renameFile(ownerId: string, fileId: string, newName: string): Promise<IFile> {
     const sanitizedName = newName.trim();
@@ -268,11 +292,16 @@ export class FileService {
     await file.save();
 
     logger.info({ fileId: file._id, newName: sanitizedName }, 'File renamed successfully');
+
+    // Invalidate file cache and listings
+    await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
+    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+
     return file;
   }
 
   /**
-   * Moves a file to another folder or to root
+   * Moves a file to another folder or to root and invalidates file caches
    */
   async moveFile(ownerId: string, fileId: string, targetFolderId: string | null): Promise<IFile> {
     const file = await this.getFile(ownerId, fileId);
@@ -323,14 +352,30 @@ export class FileService {
     await file.save();
 
     logger.info({ fileId: file._id, targetFolder: normalizedTargetId }, 'File moved successfully');
+
+    // Invalidate file cache and listings
+    await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
+    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+
     return file;
   }
 
   /**
-   * Soft deletes a file and updates user storage usage
+   * Soft deletes a file and updates user storage usage and cache
    */
   async deleteFile(ownerId: string, fileId: string): Promise<void> {
-    const file = await this.getFile(ownerId, fileId);
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
+      throw new BadRequestError('Invalid file ID', 'INVALID_FILE_ID');
+    }
+
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
+    }
+
+    if (file.ownerId.toString() !== ownerId) {
+      throw new UnauthorizedError('You do not have permission to delete this file', 'FORBIDDEN');
+    }
 
     file.isDeleted = true;
     file.deletedAt = new Date();
@@ -342,6 +387,11 @@ export class FileService {
     });
 
     logger.info({ fileId, size: file.size, ownerId }, 'File soft deleted successfully');
+
+    // Invalidate file cache, listings, and storage stats
+    await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
+    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+    await cacheService.del(CacheKeys.userStorageStats(ownerId));
   }
 }
 

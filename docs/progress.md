@@ -102,7 +102,58 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 6 — Redis
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Centralized Shared Singleton**: Implemented `getRedisClient()`, `connectRedis()`, `disconnectRedis()`, `setRedisClient()`, `isRedisReady()`, and `getRedisStatus()` in `server/src/config/redis.ts`. Manages a single connection instance with `lazyConnect: true`, 5s connect timeout, 3s command timeout, bounded exponential backoff retry strategy (capped at 5 attempts to prevent connection storms), sanitized URL logging (masks credentials), and structured lifecycle events (`connect`, `ready`, `error`, `close`, `reconnecting`, `end`).
+- **Dependency Injection**: Testable architecture with `setRedisClient` allowing injection of mock Redis clients (e.g. `ioredis-mock`) for deterministic testing.
+- **Cache Service (`ICacheService` & `CacheService`)**:
+  - Encapsulates `get`, `set` (explicit TTL), `del`, and `delByPattern` (non-blocking cursor-based `SCAN` in batches of 100).
+  - Handles JSON serialization/deserialization safely; automatically purges corrupted or malformed keys on `JSON.parse` failures to prevent repeated crashes.
+  - Strict user isolation via namespaced keys: `drivescale:user:<userId>:...`.
+  - Zero file byte caching: Redis caches only read-heavy non-sensitive metadata (folder listings, file listings, storage statistics); never caches file bytes, chunks, passwords, or tokens.
+- **Cache Invalidation on Mutations**:
+  - Folder creation/rename/delete/move: invalidates `folderChildren` for parent and destination folders, `folderDetail`, and `folderAllPattern`.
+  - File upload/rename/move/delete: invalidates `fileDetail`, `userAllFilesPattern`, and `userStorageStats`.
+  - Upload session completion: invalidates `userAllFilesPattern` and `userStorageStats`.
+- **Distributed Rate Limiting Middleware (`createRateLimiter`)**:
+  - Atomic Redis execution via Lua script (`INCR` + conditional `PEXPIRE` / `PTTL`) ensuring distributed consistency across multiple API instances without read-then-write race conditions.
+  - Returns `429 Too Many Requests` with standard headers: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and `Retry-After`.
+  - Uses standard structured JSON error responses (`TOO_MANY_REQUESTS`).
+  - Identity boundaries: Authenticated requests use `req.user._id`; unauthenticated requests use sanitized client IP (`req.ip`) with `trust proxy: 1` enabled for reverse proxy environments. Clients cannot supply spoofed headers to bypass limits.
+  - Tailored limit presets:
+    - `authRateLimiter`: 10 requests / 15 minutes per IP for `/api/v1/auth/login` and `/register`.
+    - `uploadInitRateLimiter`: 20 sessions / minute per user for `/api/v1/uploads/init`.
+    - `chunkUploadRateLimiter`: 200 chunks / minute per user for `/api/v1/uploads/:uploadId/chunks/:chunkNumber`.
+    - `generalRateLimiter`: 100 requests / minute globally across `/api/v1` (excluding `/health`).
+- **Redis Outage & Resilience Policy**:
+  - **Cache Fail-Safe**: Cache reads return `null` during Redis outages, cleanly falling back to MongoDB without throwing errors or blocking API requests. Cache writes fail silently with structured warning logs.
+  - **Rate Limiter Local Fallback**: When Redis is unreachable, the rate limiter falls back to an in-memory sliding window bucket per instance with warning logs, maintaining protection against endpoint abuse without crashing the application.
+
+### Endpoints Integrated
+- `GET /api/v1/users/me/storage`: Returns cached storage stats (`storageUsed`, `storageQuota`, `percentageUsed`, `availableBytes`).
+- `GET /api/v1/users/me`: Returns cached user profile data.
+- `GET /api/v1/folders/:id/children`: Cached with 60s TTL; invalidated on folder/file mutations.
+- `GET /api/v1/folders/:id`: Virtual breadcrumb and folder metadata cached with 300s TTL.
+- `GET /api/v1/files`: Paginated file listings cached with 60s TTL.
+- `GET /api/v1/files/:id`: File metadata cached with 300s TTL.
+- `POST /api/v1/auth/login` & `POST /api/v1/auth/register`: Rate limited by `authRateLimiter`.
+- `POST /api/v1/uploads/init`: Rate limited by `uploadInitRateLimiter`.
+- `PUT /api/v1/uploads/:uploadId/chunks/:chunkNumber`: Rate limited by `chunkUploadRateLimiter`.
+- All `/api/v1/*` routes: Protected by global `generalRateLimiter`.
+
+### Verification
+- 19 automated unit and integration tests in `server/tests/redis-cache-ratelimit.test.ts` covering:
+  - Redis client singleton lifecycle and connection states.
+  - Cache hit, miss, explicit TTL, JSON serialization, and corrupted key recovery.
+  - Cross-user namespace isolation and targeted pattern invalidation.
+  - Mutation-triggered invalidations across folder creation, folder rename, and file deletion.
+  - Distributed rate limiting headers, window limits, HTTP 429 rejection, Retry-After header, user isolation, and in-memory outage fallback.
+  - User storage stats caching and retrieval.
+- Full workspace test suite: 114 passed tests across 8 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces.
+- ESLint (`npm run lint`) passed with 0 errors and 0 warnings.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 7 — Background Workers
 Status: NOT STARTED

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as uploadController from '../controllers/upload.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
+import { uploadInitRateLimiter, chunkUploadRateLimiter } from '../middleware/rate-limit.middleware.js';
 import { initUploadSchema } from '../schemas/upload.schema.js';
 
 const router = Router();
@@ -12,6 +13,7 @@ router.use(authenticate);
 // Initialize a chunked upload session
 router.post(
   '/init',
+  uploadInitRateLimiter,
   validate({ body: initUploadSchema }),
   uploadController.initUpload
 );
@@ -19,6 +21,7 @@ router.post(
 // Upload a single chunk
 router.put(
   '/:uploadId/chunks/:chunkNumber',
+  chunkUploadRateLimiter,
   uploadController.uploadChunk
 );
 
@@ -41,4 +44,3 @@ router.delete(
 );
 
 export const uploadRoutes = router;
-

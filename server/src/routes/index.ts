@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { healthRoutes } from './health.routes.js';
 import { authRoutes } from './auth.routes.js';
+import { userRoutes } from './user.routes.js';
 import { folderRoutes } from './folder.routes.js';
 import { fileRoutes } from './file.routes.js';
 import { uploadRoutes } from './upload.routes.js';
@@ -12,6 +13,9 @@ router.use('/health', healthRoutes);
 
 // Phase 1: Authentication routes
 router.use('/auth', authRoutes);
+
+// User routes (Profile & Storage statistics)
+router.use('/users', userRoutes);
 
 // Phase 2: Folder routes
 router.use('/folders', folderRoutes);

@@ -5,6 +5,7 @@ import { File, IFile } from '../models/File.js';
 import { Folder } from '../models/Folder.js';
 import { User } from '../models/User.js';
 import { storageService, IStorageService } from './storage/index.js';
+import { cacheService, CacheKeys } from './cache.service.js';
 import { InitUploadInput, DEFAULT_CHUNK_SIZE } from '../schemas/upload.schema.js';
 import {
   BadRequestError,
@@ -397,6 +398,10 @@ export class UploadService {
       await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'COMPLETED' } });
 
       logger.info({ fileId: file._id, uploadId, size: file.size }, 'Chunked upload completed successfully');
+
+      // Invalidate file cache listings and user storage statistics
+      await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
+      await cacheService.del(CacheKeys.userStorageStats(userId));
       return file;
     } catch (dbError) {
       // Rollback assembled file and storage allocation on DB error

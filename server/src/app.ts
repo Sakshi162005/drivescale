@@ -7,9 +7,13 @@ import { logger } from './utils/logger.js';
 import { apiV1Routes } from './routes/index.js';
 import { notFoundMiddleware } from './middleware/not-found.middleware.js';
 import { errorMiddleware } from './middleware/error.middleware.js';
+import { generalRateLimiter } from './middleware/rate-limit.middleware.js';
 
 export const createApp = (): Express => {
   const app = express();
+
+  // Trust proxy for secure IP rate limiting behind reverse proxies (e.g. Nginx, Docker)
+  app.set('trust proxy', 1);
 
   // Security headers
   app.use(helmet());
@@ -48,6 +52,9 @@ export const createApp = (): Express => {
     });
     next();
   });
+
+  // Global rate limiter on API routes (skips health check)
+  app.use('/api/v1', generalRateLimiter);
 
   // API v1 routes
   app.use('/api/v1', apiV1Routes);
