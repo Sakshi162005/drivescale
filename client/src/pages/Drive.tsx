@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Folder as FolderIcon,
@@ -18,21 +18,33 @@ import {
   LogOut,
   X,
   Check,
+  Upload,
+  Download,
+  File as FileDocIcon,
+  FileText,
+  Image,
+  Film,
+  Music,
+  Archive,
+  Code,
 } from 'lucide-react';
 import { folderService } from '../services/folder.service.js';
+import { fileService } from '../services/file.service.js';
 import { useAuthStore } from '../stores/auth.store.js';
 import { Folder, BreadcrumbItem } from '../types/folder.types.js';
+import { FileItem } from '../types/file.types.js';
 
 export const Drive: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
   const activeFolderId = routeFolderId || 'root';
   const navigate = useNavigate();
 
-  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuthStore();
+  const { user, isAuthenticated, isLoading: authLoading, logout, initAuth } = useAuthStore();
 
   const [currentFolder, setCurrentFolder] = useState<{ _id: string; name: string; isRoot?: boolean } | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([]);
   const [childFolders, setChildFolders] = useState<Folder[]>([]);
+  const [files, setFiles] = useState<FileItem[]>([]);
   const [allUserFolders, setAllUserFolders] = useState<Folder[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -40,25 +52,45 @@ export const Drive: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Modals state
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  // Upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Folder modals state
+  const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [createLoading, setCreateLoading] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [createFolderLoading, setCreateFolderLoading] = useState(false);
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null);
 
   const [folderToRename, setFolderToRename] = useState<Folder | null>(null);
-  const [renameVal, setRenameVal] = useState('');
-  const [renameLoading, setRenameLoading] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameFolderVal, setRenameFolderVal] = useState('');
+  const [renameFolderLoading, setRenameFolderLoading] = useState(false);
+  const [renameFolderError, setRenameFolderError] = useState<string | null>(null);
 
   const [folderToMove, setFolderToMove] = useState<Folder | null>(null);
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
-  const [moveLoading, setMoveLoading] = useState(false);
-  const [moveError, setMoveError] = useState<string | null>(null);
+  const [selectedFolderTargetId, setSelectedFolderTargetId] = useState<string | null>(null);
+  const [moveFolderLoading, setMoveFolderLoading] = useState(false);
+  const [moveFolderError, setMoveFolderError] = useState<string | null>(null);
 
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteFolderLoading, setDeleteFolderLoading] = useState(false);
+  const [deleteFolderError, setDeleteFolderError] = useState<string | null>(null);
+
+  // File modals state
+  const [fileToRename, setFileToRename] = useState<FileItem | null>(null);
+  const [renameFileVal, setRenameFileVal] = useState('');
+  const [renameFileLoading, setRenameFileLoading] = useState(false);
+  const [renameFileError, setRenameFileError] = useState<string | null>(null);
+
+  const [fileToMove, setFileToMove] = useState<FileItem | null>(null);
+  const [selectedFileTargetId, setSelectedFileTargetId] = useState<string | null>(null);
+  const [moveFileLoading, setMoveFileLoading] = useState(false);
+  const [moveFileError, setMoveFileError] = useState<string | null>(null);
+
+  const [fileToDelete, setFileToDelete] = useState<FileItem | null>(null);
+  const [deleteFileLoading, setDeleteFileLoading] = useState(false);
+  const [deleteFileError, setDeleteFileError] = useState<string | null>(null);
 
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
@@ -69,14 +101,15 @@ export const Drive: React.FC = () => {
     }
   }, [authLoading, isAuthenticated, navigate]);
 
-  // Load folder details and children
+  // Load folder details, children folders, and files
   const loadFolderData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [folderRes, childrenRes] = await Promise.all([
+      const [folderRes, childrenRes, filesRes] = await Promise.all([
         folderService.getFolder(activeFolderId),
         folderService.getFolderChildren(activeFolderId),
+        fileService.listFiles({ folderId: activeFolderId, limit: 100 }),
       ]);
 
       if (folderRes.success && folderRes.data) {
@@ -90,6 +123,12 @@ export const Drive: React.FC = () => {
         setChildFolders(childrenRes.data.folders || []);
       } else {
         setError(childrenRes.error?.message || 'Failed to load child folders');
+      }
+
+      if (filesRes.success && filesRes.data) {
+        setFiles(filesRes.data.files || []);
+      } else {
+        setError(filesRes.error?.message || 'Failed to load files');
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading folder data');
@@ -116,12 +155,46 @@ export const Drive: React.FC = () => {
     }
   };
 
+  // Upload file handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    setUploadLoading(true);
+    setUploadError(null);
+    try {
+      const res = await fileService.uploadFile(selectedFile, activeFolderId);
+      if (res.success) {
+        // Refresh folder files and user storage
+        await Promise.all([loadFolderData(), initAuth()]);
+      } else {
+        setUploadError(res.error?.message || 'Failed to upload file');
+      }
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploadLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Download file handler
+  const handleDownloadFile = async (file: FileItem) => {
+    try {
+      await fileService.downloadFile(file._id, file.name);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  };
+
   // Create folder handler
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    setCreateLoading(true);
-    setCreateError(null);
+    setCreateFolderLoading(true);
+    setCreateFolderError(null);
     try {
       const res = await folderService.createFolder({
         name: newFolderName.trim(),
@@ -129,91 +202,159 @@ export const Drive: React.FC = () => {
       });
 
       if (res.success) {
-        setShowCreateModal(false);
+        setShowCreateFolderModal(false);
         setNewFolderName('');
         loadFolderData();
       } else {
-        setCreateError(res.error?.message || 'Failed to create folder');
+        setCreateFolderError(res.error?.message || 'Failed to create folder');
       }
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : 'Error creating folder');
+      setCreateFolderError(err instanceof Error ? err.message : 'Error creating folder');
     } finally {
-      setCreateLoading(false);
+      setCreateFolderLoading(false);
     }
   };
 
   // Rename folder handler
   const handleRenameFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!folderToRename || !renameVal.trim()) return;
-    setRenameLoading(true);
-    setRenameError(null);
+    if (!folderToRename || !renameFolderVal.trim()) return;
+    setRenameFolderLoading(true);
+    setRenameFolderError(null);
     try {
-      const res = await folderService.renameFolder(folderToRename._id, renameVal.trim());
+      const res = await folderService.renameFolder(folderToRename._id, renameFolderVal.trim());
       if (res.success) {
         setFolderToRename(null);
         loadFolderData();
       } else {
-        setRenameError(res.error?.message || 'Failed to rename folder');
+        setRenameFolderError(res.error?.message || 'Failed to rename folder');
       }
     } catch (err: unknown) {
-      setRenameError(err instanceof Error ? err.message : 'Error renaming folder');
+      setRenameFolderError(err instanceof Error ? err.message : 'Error renaming folder');
     } finally {
-      setRenameLoading(false);
+      setRenameFolderLoading(false);
     }
   };
 
   // Move folder handler
   const handleMoveFolder = async () => {
     if (!folderToMove) return;
-    setMoveLoading(true);
-    setMoveError(null);
+    setMoveFolderLoading(true);
+    setMoveFolderError(null);
     try {
       const res = await folderService.moveFolder(
         folderToMove._id,
-        selectedTargetId === 'root' ? null : selectedTargetId
+        selectedFolderTargetId === 'root' ? null : selectedFolderTargetId
       );
 
       if (res.success) {
         setFolderToMove(null);
         loadFolderData();
       } else {
-        setMoveError(res.error?.message || 'Failed to move folder');
+        setMoveFolderError(res.error?.message || 'Failed to move folder');
       }
     } catch (err: unknown) {
-      setMoveError(err instanceof Error ? err.message : 'Error moving folder');
+      setMoveFolderError(err instanceof Error ? err.message : 'Error moving folder');
     } finally {
-      setMoveLoading(false);
+      setMoveFolderLoading(false);
     }
   };
 
   // Delete folder handler
   const handleDeleteFolder = async () => {
     if (!folderToDelete) return;
-    setDeleteLoading(true);
-    setDeleteError(null);
+    setDeleteFolderLoading(true);
+    setDeleteFolderError(null);
     try {
       const res = await folderService.deleteFolder(folderToDelete._id);
       if (res.success) {
         setFolderToDelete(null);
         loadFolderData();
       } else {
-        setDeleteError(res.error?.message || 'Failed to delete folder');
+        setDeleteFolderError(res.error?.message || 'Failed to delete folder');
       }
     } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : 'Error deleting folder');
+      setDeleteFolderError(err instanceof Error ? err.message : 'Error deleting folder');
     } finally {
-      setDeleteLoading(false);
+      setDeleteFolderLoading(false);
     }
   };
 
-  // Filtered children
+  // Rename file handler
+  const handleRenameFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fileToRename || !renameFileVal.trim()) return;
+    setRenameFileLoading(true);
+    setRenameFileError(null);
+    try {
+      const res = await fileService.renameFile(fileToRename._id, renameFileVal.trim());
+      if (res.success) {
+        setFileToRename(null);
+        loadFolderData();
+      } else {
+        setRenameFileError(res.error?.message || 'Failed to rename file');
+      }
+    } catch (err: unknown) {
+      setRenameFileError(err instanceof Error ? err.message : 'Error renaming file');
+    } finally {
+      setRenameFileLoading(false);
+    }
+  };
+
+  // Move file handler
+  const handleMoveFile = async () => {
+    if (!fileToMove) return;
+    setMoveFileLoading(true);
+    setMoveFileError(null);
+    try {
+      const res = await fileService.moveFile(
+        fileToMove._id,
+        selectedFileTargetId === 'root' ? null : selectedFileTargetId
+      );
+
+      if (res.success) {
+        setFileToMove(null);
+        loadFolderData();
+      } else {
+        setMoveFileError(res.error?.message || 'Failed to move file');
+      }
+    } catch (err: unknown) {
+      setMoveFileError(err instanceof Error ? err.message : 'Error moving file');
+    } finally {
+      setMoveFileLoading(false);
+    }
+  };
+
+  // Delete file handler
+  const handleDeleteFile = async () => {
+    if (!fileToDelete) return;
+    setDeleteFileLoading(true);
+    setDeleteFileError(null);
+    try {
+      const res = await fileService.deleteFile(fileToDelete._id);
+      if (res.success) {
+        setFileToDelete(null);
+        await Promise.all([loadFolderData(), initAuth()]);
+      } else {
+        setDeleteFileError(res.error?.message || 'Failed to delete file');
+      }
+    } catch (err: unknown) {
+      setDeleteFileError(err instanceof Error ? err.message : 'Error deleting file');
+    } finally {
+      setDeleteFileLoading(false);
+    }
+  };
+
+  // Filter items
   const filteredFolders = childFolders.filter((f) =>
     f.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const filteredFiles = files.filter((f) =>
+    f.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  // Compute all descendant folder IDs to prevent moving into self or subfolders
-  const invalidDestinationIds = React.useMemo(() => {
+  // Compute invalid destinations for folder move
+  const invalidFolderDestinationIds = React.useMemo(() => {
     if (!folderToMove) return new Set<string>();
     const descendants = new Set<string>([folderToMove._id]);
     const queue = [folderToMove._id];
@@ -228,6 +369,26 @@ export const Drive: React.FC = () => {
     }
     return descendants;
   }, [folderToMove, allUserFolders]);
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const renderFileIcon = (mimeType: string, fileName: string) => {
+    if (mimeType.startsWith('image/')) return <Image size={22} color="#38BDF8" />;
+    if (mimeType.startsWith('video/')) return <Film size={22} color="#F472B6" />;
+    if (mimeType.startsWith('audio/')) return <Music size={22} color="#A78BFA" />;
+    if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('compressed')) return <Archive size={22} color="#FBBF24" />;
+    if (mimeType.includes('pdf')) return <FileText size={22} color="#EF4444" />;
+    if (mimeType.includes('json') || mimeType.includes('javascript') || mimeType.includes('typescript') || fileName.endsWith('.ts') || fileName.endsWith('.js')) return <Code size={22} color="#34D399" />;
+    return <FileDocIcon size={22} color="#94A3B8" />;
+  };
+
+  const isEmpty = filteredFolders.length === 0 && filteredFiles.length === 0;
 
   return (
     <div className="app-container" onClick={() => setOpenDropdownId(null)}>
@@ -256,7 +417,9 @@ export const Drive: React.FC = () => {
                 <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
                 <div>
                   <div className="user-name">{user.name}</div>
-                  <div className="user-email">{user.email}</div>
+                  <div className="user-email">
+                    {formatBytes(user.storageUsed || 0)} used of {formatBytes(user.storageQuota || 10737418240)}
+                  </div>
                 </div>
               </div>
               <button
@@ -272,7 +435,7 @@ export const Drive: React.FC = () => {
         </div>
       </header>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
         <h2 style={{ fontSize: '1.5rem', color: '#FFF' }}>
           {currentFolder?.name || 'My Drive'}
         </h2>
@@ -309,7 +472,7 @@ export const Drive: React.FC = () => {
             <Search size={16} className="search-icon" />
             <input
               type="text"
-              placeholder="Search folders..."
+              placeholder="Search in folder..."
               className="search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -333,11 +496,32 @@ export const Drive: React.FC = () => {
             </button>
           </div>
 
+          {/* Hidden File Input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleFileUpload}
+          />
+
           <button
             className="btn btn-primary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadLoading}
+          >
+            {uploadLoading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Upload size={16} />
+            )}
+            <span>{uploadLoading ? 'Uploading...' : 'Upload File'}</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
             onClick={(e) => {
               e.stopPropagation();
-              setShowCreateModal(true);
+              setShowCreateFolderModal(true);
             }}
           >
             <FolderPlus size={16} />
@@ -355,125 +539,239 @@ export const Drive: React.FC = () => {
           </div>
         )}
 
+        {uploadError && (
+          <div className="auth-alert" style={{ marginBottom: '1.5rem' }}>
+            <AlertCircle size={18} />
+            <span>{uploadError}</span>
+          </div>
+        )}
+
         {loading ? (
           <div className="drive-loading">
             <Loader2 size={36} className="animate-spin" color="#6366F1" />
-            <p>Loading folders...</p>
+            <p>Loading folder contents...</p>
           </div>
-        ) : filteredFolders.length === 0 ? (
+        ) : isEmpty ? (
           <div className="drive-empty">
             <div className="empty-icon-wrapper">
-              <FolderIcon size={48} />
+              <HardDrive size={48} />
             </div>
             <h3 className="empty-title">
-              {searchQuery ? 'No matching folders found' : 'This folder is empty'}
+              {searchQuery ? 'No matching items found' : 'This folder is empty'}
             </h3>
             <p className="empty-desc">
               {searchQuery
-                ? 'Try a different search query'
-                : 'Create folders to organize and structure your files.'}
+                ? 'Try adjusting your search query.'
+                : 'Upload files or create subfolders to start organizing your cloud storage.'}
             </p>
             {!searchQuery && (
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowCreateModal(true)}
-              >
-                <FolderPlus size={16} />
-                Create New Folder
-              </button>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload size={16} />
+                  Upload First File
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowCreateFolderModal(true)}
+                >
+                  <FolderPlus size={16} />
+                  New Folder
+                </button>
+              </div>
             )}
           </div>
         ) : viewMode === 'grid' ? (
           /* Grid View */
-          <div className="folder-grid">
-            {filteredFolders.map((folder) => (
-              <div
-                key={folder._id}
-                className="folder-card"
-                onDoubleClick={() => navigate(`/drive/${folder._id}`)}
-              >
-                <div
-                  className="folder-card-clickable"
-                  onClick={() => navigate(`/drive/${folder._id}`)}
-                >
-                  <div className="folder-icon-box">
-                    <FolderIcon size={24} />
-                  </div>
-                  <div className="folder-info">
-                    <h4 className="folder-name" title={folder.name}>
-                      {folder.name}
-                    </h4>
-                    <span className="folder-meta">
-                      {new Date(folder.updatedAt).toLocaleDateString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </span>
-                  </div>
-                </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {/* Folders Section */}
+            {filteredFolders.length > 0 && (
+              <div>
+                <h3 className="section-title">Folders ({filteredFolders.length})</h3>
+                <div className="folder-grid">
+                  {filteredFolders.map((folder) => (
+                    <div
+                      key={folder._id}
+                      className="folder-card"
+                      onDoubleClick={() => navigate(`/drive/${folder._id}`)}
+                    >
+                      <div
+                        className="folder-card-clickable"
+                        onClick={() => navigate(`/drive/${folder._id}`)}
+                      >
+                        <div className="folder-icon-box">
+                          <FolderIcon size={24} />
+                        </div>
+                        <div className="folder-info">
+                          <h4 className="folder-name" title={folder.name}>
+                            {folder.name}
+                          </h4>
+                          <span className="folder-meta">
+                            {new Date(folder.updatedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
 
-                <div className="folder-dropdown-container">
-                  <button
-                    className="folder-menu-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenDropdownId(openDropdownId === folder._id ? null : folder._id);
-                    }}
-                    title="Folder options"
-                  >
-                    <MoreVertical size={16} />
-                  </button>
+                      <div className="folder-dropdown-container">
+                        <button
+                          className="folder-menu-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenDropdownId(openDropdownId === folder._id ? null : folder._id);
+                          }}
+                          title="Folder options"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
 
-                  {openDropdownId === folder._id && (
-                    <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="dropdown-item"
-                        onClick={() => {
-                          setFolderToRename(folder);
-                          setRenameVal(folder.name);
-                          setOpenDropdownId(null);
-                        }}
-                      >
-                        <Edit2 size={14} />
-                        <span>Rename</span>
-                      </button>
-                      <button
-                        className="dropdown-item"
-                        onClick={() => {
-                          setFolderToMove(folder);
-                          setSelectedTargetId(folder.parentId || 'root');
-                          loadAllFolders();
-                          setOpenDropdownId(null);
-                        }}
-                      >
-                        <FolderInput size={14} />
-                        <span>Move</span>
-                      </button>
-                      <button
-                        className="dropdown-item danger"
-                        onClick={() => {
-                          setFolderToDelete(folder);
-                          setOpenDropdownId(null);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        <span>Delete</span>
-                      </button>
+                        {openDropdownId === folder._id && (
+                          <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                setFolderToRename(folder);
+                                setRenameFolderVal(folder.name);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Edit2 size={14} />
+                              <span>Rename</span>
+                            </button>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                setFolderToMove(folder);
+                                setSelectedFolderTargetId(folder.parentId || 'root');
+                                loadAllFolders();
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <FolderInput size={14} />
+                              <span>Move</span>
+                            </button>
+                            <button
+                              className="dropdown-item danger"
+                              onClick={() => {
+                                setFolderToDelete(folder);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Trash2 size={14} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* Files Section */}
+            {filteredFiles.length > 0 && (
+              <div>
+                <h3 className="section-title">Files ({filteredFiles.length})</h3>
+                <div className="folder-grid">
+                  {filteredFiles.map((file) => (
+                    <div key={file._id} className="folder-card file-card">
+                      <div
+                        className="folder-card-clickable"
+                        onClick={() => handleDownloadFile(file)}
+                        title="Click to download"
+                      >
+                        <div className="folder-icon-box file-icon-box">
+                          {renderFileIcon(file.mimeType, file.name)}
+                        </div>
+                        <div className="folder-info">
+                          <h4 className="folder-name" title={file.name}>
+                            {file.name}
+                          </h4>
+                          <span className="folder-meta">
+                            {formatBytes(file.size)} • {new Date(file.updatedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="folder-dropdown-container">
+                        <button
+                          className="folder-menu-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenDropdownId(openDropdownId === file._id ? null : file._id);
+                          }}
+                          title="File options"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+
+                        {openDropdownId === file._id && (
+                          <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                handleDownloadFile(file);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Download size={14} />
+                              <span>Download</span>
+                            </button>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                setFileToRename(file);
+                                setRenameFileVal(file.name);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Edit2 size={14} />
+                              <span>Rename</span>
+                            </button>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                setFileToMove(file);
+                                setSelectedFileTargetId(file.folderId || 'root');
+                                loadAllFolders();
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <FolderInput size={14} />
+                              <span>Move</span>
+                            </button>
+                            <button
+                              className="dropdown-item danger"
+                              onClick={() => {
+                                setFileToDelete(file);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Trash2 size={14} />
+                              <span>Delete</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* List View */
           <div className="folder-list">
             <div className="folder-list-header">
               <span>Name</span>
+              <span>Size / Items</span>
               <span>Modified</span>
               <span>Actions</span>
             </div>
+
+            {/* Folders in List */}
             {filteredFolders.map((folder) => (
               <div
                 key={folder._id}
@@ -487,19 +785,16 @@ export const Drive: React.FC = () => {
                   <FolderIcon size={18} className="list-folder-icon" />
                   <span className="list-folder-name">{folder.name}</span>
                 </div>
+                <div className="list-date-col">Folder</div>
                 <div className="list-date-col">
-                  {new Date(folder.updatedAt).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
+                  {new Date(folder.updatedAt).toLocaleDateString()}
                 </div>
                 <div className="list-actions-col">
                   <button
                     className="icon-action-btn"
                     onClick={() => {
                       setFolderToRename(folder);
-                      setRenameVal(folder.name);
+                      setRenameFolderVal(folder.name);
                     }}
                     title="Rename"
                   >
@@ -509,7 +804,7 @@ export const Drive: React.FC = () => {
                     className="icon-action-btn"
                     onClick={() => {
                       setFolderToMove(folder);
-                      setSelectedTargetId(folder.parentId || 'root');
+                      setSelectedFolderTargetId(folder.parentId || 'root');
                       loadAllFolders();
                     }}
                     title="Move"
@@ -526,28 +821,82 @@ export const Drive: React.FC = () => {
                 </div>
               </div>
             ))}
+
+            {/* Files in List */}
+            {filteredFiles.map((file) => (
+              <div key={file._id} className="folder-list-row">
+                <div
+                  className="list-name-col"
+                  onClick={() => handleDownloadFile(file)}
+                >
+                  {renderFileIcon(file.mimeType, file.name)}
+                  <span className="list-folder-name">{file.name}</span>
+                </div>
+                <div className="list-date-col">{formatBytes(file.size)}</div>
+                <div className="list-date-col">
+                  {new Date(file.updatedAt).toLocaleDateString()}
+                </div>
+                <div className="list-actions-col">
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => handleDownloadFile(file)}
+                    title="Download"
+                  >
+                    <Download size={14} />
+                  </button>
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => {
+                      setFileToRename(file);
+                      setRenameFileVal(file.name);
+                    }}
+                    title="Rename"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => {
+                      setFileToMove(file);
+                      setSelectedFileTargetId(file.folderId || 'root');
+                      loadAllFolders();
+                    }}
+                    title="Move"
+                  >
+                    <FolderInput size={14} />
+                  </button>
+                  <button
+                    className="icon-action-btn danger"
+                    onClick={() => setFileToDelete(file)}
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </main>
 
       {/* Modal: Create Folder */}
-      {showCreateModal && (
-        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+      {showCreateFolderModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateFolderModal(false)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">Create New Folder</h3>
               <button
                 className="modal-close-btn"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setShowCreateFolderModal(false)}
               >
                 <X size={18} />
               </button>
             </div>
 
-            {createError && (
+            {createFolderError && (
               <div className="auth-alert">
                 <AlertCircle size={16} />
-                <span>{createError}</span>
+                <span>{createFolderError}</span>
               </div>
             )}
 
@@ -572,16 +921,16 @@ export const Drive: React.FC = () => {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => setShowCreateFolderModal(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={createLoading || !newFolderName.trim()}
+                  disabled={createFolderLoading || !newFolderName.trim()}
                 >
-                  {createLoading ? 'Creating...' : 'Create Folder'}
+                  {createFolderLoading ? 'Creating...' : 'Create Folder'}
                 </button>
               </div>
             </form>
@@ -603,10 +952,10 @@ export const Drive: React.FC = () => {
               </button>
             </div>
 
-            {renameError && (
+            {renameFolderError && (
               <div className="auth-alert">
                 <AlertCircle size={16} />
-                <span>{renameError}</span>
+                <span>{renameFolderError}</span>
               </div>
             )}
 
@@ -619,8 +968,8 @@ export const Drive: React.FC = () => {
                   id="renameInput"
                   type="text"
                   className="form-input"
-                  value={renameVal}
-                  onChange={(e) => setRenameVal(e.target.value)}
+                  value={renameFolderVal}
+                  onChange={(e) => setRenameFolderVal(e.target.value)}
                   autoFocus
                   required
                 />
@@ -637,9 +986,9 @@ export const Drive: React.FC = () => {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={renameLoading || !renameVal.trim()}
+                  disabled={renameFolderLoading || !renameFolderVal.trim()}
                 >
-                  {renameLoading ? 'Renaming...' : 'Save Name'}
+                  {renameFolderLoading ? 'Renaming...' : 'Save Name'}
                 </button>
               </div>
             </form>
@@ -661,10 +1010,10 @@ export const Drive: React.FC = () => {
               </button>
             </div>
 
-            {moveError && (
+            {moveFolderError && (
               <div className="auth-alert">
                 <AlertCircle size={16} />
-                <span>{moveError}</span>
+                <span>{moveFolderError}</span>
               </div>
             )}
 
@@ -674,25 +1023,25 @@ export const Drive: React.FC = () => {
 
             <div className="destination-tree">
               <div
-                className={`destination-item ${selectedTargetId === 'root' || selectedTargetId === null ? 'selected' : ''}`}
-                onClick={() => setSelectedTargetId('root')}
+                className={`destination-item ${selectedFolderTargetId === 'root' || selectedFolderTargetId === null ? 'selected' : ''}`}
+                onClick={() => setSelectedFolderTargetId('root')}
               >
                 <HardDrive size={16} />
                 <span>My Drive (Root)</span>
-                {(selectedTargetId === 'root' || selectedTargetId === null) && <Check size={14} />}
+                {(selectedFolderTargetId === 'root' || selectedFolderTargetId === null) && <Check size={14} />}
               </div>
 
               {allUserFolders
-                .filter((f) => !invalidDestinationIds.has(f._id))
+                .filter((f) => !invalidFolderDestinationIds.has(f._id))
                 .map((target) => (
                   <div
                     key={target._id}
-                    className={`destination-item ${selectedTargetId === target._id ? 'selected' : ''}`}
-                    onClick={() => setSelectedTargetId(target._id)}
+                    className={`destination-item ${selectedFolderTargetId === target._id ? 'selected' : ''}`}
+                    onClick={() => setSelectedFolderTargetId(target._id)}
                   >
                     <FolderIcon size={16} />
                     <span>{target.name}</span>
-                    {selectedTargetId === target._id && <Check size={14} />}
+                    {selectedFolderTargetId === target._id && <Check size={14} />}
                   </div>
                 ))}
             </div>
@@ -709,16 +1058,16 @@ export const Drive: React.FC = () => {
                 type="button"
                 className="btn btn-primary"
                 onClick={handleMoveFolder}
-                disabled={moveLoading}
+                disabled={moveFolderLoading}
               >
-                {moveLoading ? 'Moving...' : 'Move Here'}
+                {moveFolderLoading ? 'Moving...' : 'Move Here'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Delete Confirmation */}
+      {/* Modal: Delete Folder Confirmation */}
       {folderToDelete && (
         <div className="modal-backdrop" onClick={() => setFolderToDelete(null)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -734,10 +1083,10 @@ export const Drive: React.FC = () => {
               </button>
             </div>
 
-            {deleteError && (
+            {deleteFolderError && (
               <div className="auth-alert">
                 <AlertCircle size={16} />
-                <span>{deleteError}</span>
+                <span>{deleteFolderError}</span>
               </div>
             )}
 
@@ -761,9 +1110,188 @@ export const Drive: React.FC = () => {
                 className="btn btn-primary"
                 style={{ background: 'var(--accent-rose)' }}
                 onClick={handleDeleteFolder}
-                disabled={deleteLoading}
+                disabled={deleteFolderLoading}
               >
-                {deleteLoading ? 'Deleting...' : 'Delete Permanently'}
+                {deleteFolderLoading ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Rename File */}
+      {fileToRename && (
+        <div className="modal-backdrop" onClick={() => setFileToRename(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Rename File</h3>
+              <button
+                className="modal-close-btn"
+                onClick={() => setFileToRename(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {renameFileError && (
+              <div className="auth-alert">
+                <AlertCircle size={16} />
+                <span>{renameFileError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRenameFile}>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label" htmlFor="renameFileInput">
+                  File Name
+                </label>
+                <input
+                  id="renameFileInput"
+                  type="text"
+                  className="form-input"
+                  value={renameFileVal}
+                  onChange={(e) => setRenameFileVal(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setFileToRename(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={renameFileLoading || !renameFileVal.trim()}
+                >
+                  {renameFileLoading ? 'Renaming...' : 'Save Name'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Move File */}
+      {fileToMove && (
+        <div className="modal-backdrop" onClick={() => setFileToMove(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Move &quot;{fileToMove.name}&quot;</h3>
+              <button
+                className="modal-close-btn"
+                onClick={() => setFileToMove(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {moveFileError && (
+              <div className="auth-alert">
+                <AlertCircle size={16} />
+                <span>{moveFileError}</span>
+              </div>
+            )}
+
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+              Select destination folder:
+            </p>
+
+            <div className="destination-tree">
+              <div
+                className={`destination-item ${selectedFileTargetId === 'root' || selectedFileTargetId === null ? 'selected' : ''}`}
+                onClick={() => setSelectedFileTargetId('root')}
+              >
+                <HardDrive size={16} />
+                <span>My Drive (Root)</span>
+                {(selectedFileTargetId === 'root' || selectedFileTargetId === null) && <Check size={14} />}
+              </div>
+
+              {allUserFolders.map((target) => (
+                <div
+                  key={target._id}
+                  className={`destination-item ${selectedFileTargetId === target._id ? 'selected' : ''}`}
+                  onClick={() => setSelectedFileTargetId(target._id)}
+                >
+                  <FolderIcon size={16} />
+                  <span>{target.name}</span>
+                  {selectedFileTargetId === target._id && <Check size={14} />}
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setFileToMove(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleMoveFile}
+                disabled={moveFileLoading}
+              >
+                {moveFileLoading ? 'Moving...' : 'Move Here'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete File Confirmation */}
+      {fileToDelete && (
+        <div className="modal-backdrop" onClick={() => setFileToDelete(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: 'var(--accent-rose)' }}>
+                Delete File
+              </h3>
+              <button
+                className="modal-close-btn"
+                onClick={() => setFileToDelete(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {deleteFileError && (
+              <div className="auth-alert">
+                <AlertCircle size={16} />
+                <span>{deleteFileError}</span>
+              </div>
+            )}
+
+            <p style={{ fontSize: '0.9375rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+              Are you sure you want to delete <strong>&quot;{fileToDelete.name}&quot;</strong> ({formatBytes(fileToDelete.size)})?
+            </p>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+              This will free up storage space in your account.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setFileToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ background: 'var(--accent-rose)' }}
+                onClick={handleDeleteFile}
+                disabled={deleteFileLoading}
+              >
+                {deleteFileLoading ? 'Deleting...' : 'Delete File'}
               </button>
             </div>
           </div>

@@ -20,7 +20,9 @@ export const apiFetch = async <T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> => {
   const headers = new Headers(options.headers || {});
-  headers.set('Content-Type', 'application/json');
+  if (!(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   if (currentAccessToken) {
     headers.set('Authorization', `Bearer ${currentAccessToken}`);
