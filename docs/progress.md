@@ -42,7 +42,33 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 4 — Chunked Uploads
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **UploadSession Model**: Persists upload state with `_id`, `userId`, `fileName`, `folderId`, `totalSize`, `chunkSize`, `totalChunks`, `uploadedChunks` (metadata with chunkNumber, size, checksum), `storageKey`, `status` (`PENDING`, `UPLOADING`, `ASSEMBLING`, `COMPLETED`, `FAILED`, `EXPIRED`, `CANCELLED`), and `expiresAt` (24h TTL).
+- **Temporary Chunk Storage**: Isolated chunk files saved to `data/storage/chunks/<uploadId>/chunk_<chunkNumber>` with atomic renaming to avoid partial writes.
+- **Chunk Stream Assembly**: Node.js stream pipeline assembles chunks in strict numerical order into the final storage key, calculating final SHA-256 and byte size on the fly without in-memory buffering.
+- **Controlled Concurrency**: Frontend orchestrates uploads via a worker pool with a default limit of 3 concurrent chunks.
+- **Duplicate & Conflict Handling**: Duplicate identical chunks are acknowledged idempotently (200 OK), while conflicting duplicate chunks are safely rejected with 409 Conflict.
+- **Assembly Concurrency Guard**: Atomic acquisition of `ASSEMBLING` state prevents race conditions during file finalization.
+
+### Endpoints
+- `POST /api/v1/uploads/init`: Initialize a chunked upload session with filename, total size, folder target, and chunk configuration.
+- `PUT /api/v1/uploads/:uploadId/chunks/:chunkNumber`: Upload individual chunks using either multipart streaming or raw binary stream.
+- `POST /api/v1/uploads/:uploadId/complete`: Assemble all chunks into the final file, create metadata, update user storage quota, and purge temporary chunks.
+- `GET /api/v1/uploads/:uploadId/status`: Check session progress and list of uploaded chunks.
+- `DELETE /api/v1/uploads/:uploadId`: Cancel session and clean up temporary chunk files.
+
+### Frontend Integration
+- `client/src/services/upload.service.ts`: Implements `uploadFileChunked` with 3-worker concurrency pool, progress callbacks, and session assembly.
+- `client/src/pages/Drive.tsx`: Updated with live chunked upload progress card showing chunk count, concurrency, byte progress, and percentage.
+
+### Verification
+- 18 automated tests in `server/tests/upload.test.ts` verifying session creation, chunk size validation, out-of-order ingestion, duplicate handling, missing chunks, assembly, and concurrency.
+- Full workspace test suite: 80 passed tests across 6 test suites.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors.
+- ESLint (`npm run lint`) passed with 0 errors.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 5 — Resumable Uploads
 Status: NOT STARTED

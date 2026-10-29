@@ -40,4 +40,19 @@ export interface IStorageService {
    * Retrieves metadata of the stored object
    */
   getMetadata(key: string): Promise<StorageMetadata>;
+
+  /**
+   * Saves a chunk stream for an upload session
+   */
+  saveChunk(uploadId: string, chunkNumber: number, stream: NodeJS.ReadableStream): Promise<StorageUploadResult>;
+
+  /**
+   * Deletes all temporary chunks for an upload session
+   */
+  deleteChunks(uploadId: string): Promise<void>;
+
+  /**
+   * Assembles all chunks in numerical order into targetKey using streams
+   */
+  assembleChunks(uploadId: string, totalChunks: number, targetKey: string): Promise<StorageUploadResult>;
 }

@@ -3,6 +3,7 @@ import { healthRoutes } from './health.routes.js';
 import { authRoutes } from './auth.routes.js';
 import { folderRoutes } from './folder.routes.js';
 import { fileRoutes } from './file.routes.js';
+import { uploadRoutes } from './upload.routes.js';
 
 const router = Router();
 
@@ -17,5 +18,8 @@ router.use('/folders', folderRoutes);
 
 // Phase 3: File routes
 router.use('/files', fileRoutes);
+
+// Phase 4: Chunked upload routes
+router.use('/uploads', uploadRoutes);
 
 export const apiV1Routes = router;
