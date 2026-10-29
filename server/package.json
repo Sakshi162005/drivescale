@@ -13,7 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/busboy": "^1.5.4",
     "argon2": "^0.45.1",
+    "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

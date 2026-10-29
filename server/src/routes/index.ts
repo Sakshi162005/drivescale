@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { healthRoutes } from './health.routes.js';
 import { authRoutes } from './auth.routes.js';
 import { folderRoutes } from './folder.routes.js';
+import { fileRoutes } from './file.routes.js';
 
 const router = Router();
 
@@ -13,5 +14,8 @@ router.use('/auth', authRoutes);
 
 // Phase 2: Folder routes
 router.use('/folders', folderRoutes);
+
+// Phase 3: File routes
+router.use('/files', fileRoutes);
 
 export const apiV1Routes = router;
