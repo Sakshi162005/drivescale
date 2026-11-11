@@ -6,6 +6,7 @@ import { User } from '../models/User.js';
 import { storageService, IStorageService } from './storage/index.js';
 import { ListFilesQueryInput } from '../schemas/file.schema.js';
 import { cacheService, CacheKeys } from './cache.service.js';
+import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
 import {
   BadRequestError,
   ConflictError,
@@ -141,6 +142,16 @@ export class FileService {
       // Invalidate file listings and storage stats cache
       await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
       await cacheService.del(CacheKeys.userStorageStats(ownerId));
+
+      // Asynchronously enqueue thumbnail generation in background (non-blocking)
+      enqueueThumbnailGeneration({
+        fileId: file._id.toString(),
+        ownerId: file.ownerId.toString(),
+        mimeType: file.mimeType,
+        storageKey: file.storageKey,
+      }).catch((err) => {
+        logger.warn({ fileId: file._id, err: err instanceof Error ? err.message : 'Unknown' }, 'Failed to enqueue thumbnail job');
+      });
 
       return file;
     } catch (dbError) {

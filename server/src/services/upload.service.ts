@@ -6,6 +6,8 @@ import { Folder } from '../models/Folder.js';
 import { User } from '../models/User.js';
 import { storageService, IStorageService } from './storage/index.js';
 import { cacheService, CacheKeys } from './cache.service.js';
+import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
+import { enqueueNotification } from '../queues/notification.queue.js';
 import { InitUploadInput, DEFAULT_CHUNK_SIZE } from '../schemas/upload.schema.js';
 import {
   BadRequestError,
@@ -402,6 +404,28 @@ export class UploadService {
       // Invalidate file cache listings and user storage statistics
       await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
       await cacheService.del(CacheKeys.userStorageStats(userId));
+
+      // Asynchronously enqueue thumbnail generation in background (non-blocking)
+      enqueueThumbnailGeneration({
+        fileId: file._id.toString(),
+        ownerId: file.ownerId.toString(),
+        mimeType: file.mimeType,
+        storageKey: file.storageKey,
+      }).catch((err) => {
+        logger.warn({ fileId: file._id, err: err instanceof Error ? err.message : 'Unknown' }, 'Failed to enqueue thumbnail job');
+      });
+
+      // Asynchronously enqueue notification in background (non-blocking)
+      enqueueNotification({
+        userId: file.ownerId.toString(),
+        type: 'UPLOAD_COMPLETED',
+        title: 'Upload Completed',
+        message: `File '${file.name}' has been uploaded successfully`,
+        metadata: { fileId: file._id.toString(), size: file.size },
+      }).catch((err) => {
+        logger.warn({ fileId: file._id, err: err instanceof Error ? err.message : 'Unknown' }, 'Failed to enqueue notification job');
+      });
+
       return file;
     } catch (dbError) {
       // Rollback assembled file and storage allocation on DB error

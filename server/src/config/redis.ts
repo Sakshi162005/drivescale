@@ -5,6 +5,64 @@ import { logger } from '../utils/logger.js';
 let redisClient: Redis | null = null;
 let redisStatus: 'connected' | 'connecting' | 'disconnected' | 'ready' = 'disconnected';
 
+let bullmqConnectionFactory: (() => Redis) | null = null;
+const bullmqConnections: Redis[] = [];
+
+/**
+ * Injects a custom connection factory for BullMQ (useful for testing with mocks)
+ */
+export const setBullMQConnectionFactory = (factory: (() => Redis) | null): void => {
+  bullmqConnectionFactory = factory;
+};
+
+/**
+ * Creates a dedicated Redis connection for BullMQ with maxRetriesPerRequest: null
+ */
+export const createBullMQConnection = (): Redis => {
+  if (bullmqConnectionFactory) {
+    const mock = bullmqConnectionFactory();
+    bullmqConnections.push(mock);
+    return mock;
+  }
+
+  const client = new Redis(env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    lazyConnect: true,
+    connectTimeout: 10000,
+    retryStrategy: (times) => {
+      if (times > 10) {
+        logger.warn('BullMQ Redis retry limit reached');
+        return null;
+      }
+      return Math.min(times * 200, 3000);
+    },
+  });
+
+  client.on('error', (err: Error) => {
+    logger.error({ err: err.message }, 'BullMQ Redis connection error');
+  });
+
+  bullmqConnections.push(client);
+  return client;
+};
+
+/**
+ * Closes all BullMQ connections created by createBullMQConnection
+ */
+export const closeBullMQConnections = async (): Promise<void> => {
+  while (bullmqConnections.length > 0) {
+    const conn = bullmqConnections.pop();
+    if (conn) {
+      try {
+        await conn.quit();
+      } catch {
+        conn.disconnect();
+      }
+    }
+  }
+};
+
 /**
  * Sanitizes Redis connection URL for secure logging (masks password)
  */
@@ -113,6 +171,7 @@ export const connectRedis = async (): Promise<boolean> => {
  * Disconnects Redis cleanly during shutdown
  */
 export const disconnectRedis = async (): Promise<void> => {
+  await closeBullMQConnections();
   if (redisClient) {
     try {
       await redisClient.quit();

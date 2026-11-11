@@ -156,7 +156,45 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 7 — Background Workers
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **BullMQ Integration with Shared Redis**: Centralized queue creation using `createBullMQConnection()` in `server/src/config/redis.ts` configured with `maxRetriesPerRequest: null`, bounded retry backoff, and connection tracking for graceful shutdown.
+- **Modular Monolith Worker Process**:
+  - Independent entry point `server/src/worker.ts` executed via `npm run worker` (or `npm run dev:server` for API only).
+  - Connects to MongoDB and Redis independently, initializes workers, registers repeatable upload cleanup schedule, and handles `SIGINT`/`SIGTERM` with graceful queue/worker/connection drainage.
+- **Queues & Job Producers (`server/src/queues/`)**:
+  - `cleanup-queue` (`cleanup.queue.ts`): Producers for `cleanup-expired-upload` and `cleanup-trash` (scaffold).
+  - `file-queue` (`file.queue.ts`): Producer for `generate-thumbnail`.
+  - `notification-queue` (`notification.queue.ts`): Producer for `send-notification`.
+  - Configurable default retry policies: 3 attempts with exponential backoff (2000ms delay), retention of 100 completed jobs and 500 failed jobs (7-day TTL).
+- **Worker Processors (`server/src/workers/`)**:
+  - `cleanup.worker.ts`:
+    - `cleanup-expired-upload`: Identifies sessions with `status: { $in: ['PENDING', 'UPLOADING', 'FAILED'] }` and `expiresAt < now`. Employs immediate atomic status transition to `EXPIRED` before deleting chunks, guaranteeing that active, completed, or assembling uploads are never deleted. Idempotently ignores already-removed chunk files.
+    - `cleanup-trash`: Typed payload validation scaffold for Phase 10 without premature deletion.
+  - `file.worker.ts`:
+    - `generate-thumbnail`: Validates payload (`fileId`, `storageKey`, `mimeType`), verifies supported image MIME type (`image/jpeg`, `png`, `webp`, `gif`), verifies storage file existence, and safely handles unsupported types or missing files.
+  - `notification.worker.ts`:
+    - `send-notification`: Validates payload, dispatches via `INotificationProvider` (`LogNotificationProvider` default in development), and retries on delivery failure.
+- **API Integration**:
+  - Non-blocking enqueuing of thumbnail generation on single file uploads (`FileService.uploadFile`) and chunked upload completion (`UploadService.completeUpload`).
+  - Non-blocking enqueuing of upload completion notification in `UploadService.completeUpload`.
+- **Docker Compose**:
+  - Documented dedicated `worker` service in `docker-compose.yml` sharing network and Redis/MongoDB dependencies without running duplicate worker threads inside the API container.
+
+### Verification
+- 21 automated unit and integration tests in `server/tests/worker.test.ts` covering:
+  - Queue initialization and default retry/retention options.
+  - Job payload schema validation and rejection of invalid data.
+  - Expired upload session cleanup, preservation of active/completed/assembling sessions, and idempotent handling of missing files.
+  - Trash cleanup scaffold verification without file deletions.
+  - Thumbnail job MIME type filtering, storage checks, and error handling.
+  - Notification job provider dispatch and retryable delivery failure.
+  - Worker lifecycle and clean shutdown.
+- Full workspace test suite: 135 passed tests across 9 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces.
+- ESLint (`npm run lint`) passed with 0 errors and 0 warnings.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 8 — Sharing and Permissions
 Status: NOT STARTED

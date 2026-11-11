@@ -22,6 +22,14 @@ const envSchema = z.object({
   RATE_LIMIT_AUTH_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_UPLOAD_INIT_LIMIT: z.coerce.number().default(20), // 20 req/min for upload init
   RATE_LIMIT_UPLOAD_INIT_WINDOW_MS: z.coerce.number().default(60000),
+  // BullMQ & Background Worker configuration
+  BULLMQ_CONCURRENCY: z.coerce.number().default(5),
+  BULLMQ_MAX_RETRIES: z.coerce.number().default(3),
+  BULLMQ_BACKOFF_DELAY_MS: z.coerce.number().default(2000),
+  BULLMQ_COMPLETED_RETENTION_COUNT: z.coerce.number().default(100),
+  BULLMQ_FAILED_RETENTION_COUNT: z.coerce.number().default(500),
+  BULLMQ_FAILED_RETENTION_AGE_SECONDS: z.coerce.number().default(604800), // 7 days
+  BULLMQ_CLEANUP_INTERVAL_MS: z.coerce.number().default(3600000), // 1 hour
   CLIENT_URL: z.string().default('http://localhost:5173'),
   LOG_LEVEL: z.string().optional().default('info'),
   JWT_ACCESS_SECRET: z.string().default('drivescale-development-access-secret-32-chars-min!'),

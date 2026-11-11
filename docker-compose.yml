@@ -35,6 +35,28 @@ services:
       retries: 5
       start_period: 5s
 
+  # Background Worker service (Phase 7)
+  # Connects to shared Redis and MongoDB infrastructure
+  # For local development: run `npm run worker` (or `npm run worker:server`)
+  # In containerized deployment:
+  # worker:
+  #   image: node:20-alpine
+  #   container_name: drivescale-worker
+  #   working_dir: /app
+  #   command: npm run worker --workspace=server
+  #   restart: unless-stopped
+  #   environment:
+  #     - NODE_ENV=production
+  #     - MONGODB_URI=mongodb://mongodb:27017/drivescale
+  #     - REDIS_URL=redis://redis:6379
+  #   depends_on:
+  #     mongodb:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - drivescale-network
+
 volumes:
   mongodb_data:
     driver: local
