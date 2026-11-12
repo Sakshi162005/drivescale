@@ -12,6 +12,9 @@ export interface IFile extends Document {
   versionCount?: number;
   isDeleted: boolean;
   deletedAt: Date | null;
+  deletedBy?: Types.ObjectId | null;
+  originalFolderId?: Types.ObjectId | null;
+  deletedWithFolderId?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +79,22 @@ const fileSchema = new Schema<IFile>(
       type: Date,
       default: null,
     },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    originalFolderId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Folder',
+      default: null,
+    },
+    deletedWithFolderId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Folder',
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -93,5 +112,11 @@ fileSchema.index({ ownerId: 1, folderId: 1, isDeleted: 1 });
 
 // Compound index for unique check of active file name within same folder
 fileSchema.index({ ownerId: 1, folderId: 1, name: 1, isDeleted: 1 });
+
+// Compound index for querying user's top-level trashed files
+fileSchema.index({ ownerId: 1, isDeleted: 1, deletedWithFolderId: 1, deletedAt: -1 });
+
+// Index for background expiration cleanup worker
+fileSchema.index({ isDeleted: 1, deletedAt: 1 });
 
 export const File = mongoose.model<IFile>('File', fileSchema);

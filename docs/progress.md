@@ -340,7 +340,68 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 10 — Trash and Recovery
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Soft Deletion & Metadata Tracking**:
+  - Files and Folders track `isDeleted: true`, `deletedAt`, `deletedBy`, `originalFolderId` / `originalParentId`, and `deletedWithFolderId: null` for top-level deletions.
+  - Soft-deleting a folder cascades deletion to all descendant folders and files, tagging them with `deletedWithFolderId: folder._id` and decrementing the owner's active `storageUsed`.
+  - Normal drive queries, breadcrumb calculations, child listings, downloads, and version downloads exclude trashed resources (`isDeleted: false`).
+- **Trash Listing API**:
+  - `GET /api/v1/trash` queries only top-level trashed items (`isDeleted: true`, `deletedWithFolderId: null`) for the authenticated user, resolving human-readable `originalLocationName` and supporting pagination (`page`, `limit`) and type filtering (`all`, `file`, `folder`).
+- **Safe Restoration**:
+  - `POST /api/v1/trash/:id/restore` (and dedicated `/trash/files/:id/restore`, `/trash/folders/:id/restore`, `/files/:id/restore`, `/folders/:id/restore`):
+    - Restores file/folder to original location or falls back to root if parent is missing or trashed.
+    - Resolves name collisions non-destructively by appending ` (restored)` or ` (restored N)`.
+    - Folder restore cascades restoration to all descendant files and subfolders tagged with `deletedWithFolderId: folder._id`, leaving independently deleted items intact in trash.
+    - Re-increments the owner's `storageUsed`.
+    - Preserves all historical versions in `FileVersion`.
+- **Permanent Deletion & Physical Cleanup**:
+  - `DELETE /api/v1/trash/:id/permanent` (and dedicated file/folder/empty endpoints):
+    - Rejects non-trashed items with 404 Not Found.
+    - Purges file record, associated shares (`Share.deleteMany`), all version records (`FileVersion.deleteMany`), and physical storage objects from disk for both `storageKey` and all version storage keys.
+    - Folder permanent delete removes all descendant files, file versions, storage objects, subfolders, and share records.
+    - `DELETE /api/v1/trash/empty` permanently deletes all trash items for the requesting user.
+- **Automated Background Worker Job**:
+  - BullMQ job `CLEANUP_JOB_NAMES.CLEANUP_TRASH` in `cleanup.worker.ts` executes `trashService.cleanupExpiredTrash(olderThanDays, batchSize)` using `TRASH_RETENTION_DAYS` (30 days) and `TRASH_CLEANUP_BATCH_SIZE` (100).
+  - Repeatable schedule registered in `worker.ts`.
+- **Redis Cache Invalidation**:
+  - Trash lists, folder children, folder trees, file listings, and storage stats caches are invalidated on soft deletion, restore, and permanent deletion.
+
+### Endpoints
+- `GET /api/v1/trash`: Paginated list of top-level deleted files and folders for authenticated user with resolved location names and type filtering.
+- `POST /api/v1/trash/:id/restore`: Restores a file or folder from trash to original or root location with collision resolution and cascading folder restoration.
+- `POST /api/v1/trash/files/:id/restore` & `POST /api/v1/files/:id/restore`: Specific endpoints for file restoration.
+- `POST /api/v1/trash/folders/:id/restore` & `POST /api/v1/folders/:id/restore`: Specific endpoints for folder restoration.
+- `DELETE /api/v1/trash/:id/permanent`: Permanently deletes an item from trash, destroying metadata, versions, shares, and storage objects.
+- `DELETE /api/v1/trash/files/:id/permanent` & `DELETE /api/v1/files/:id/permanent`: Specific endpoints for permanent file deletion.
+- `DELETE /api/v1/trash/folders/:id/permanent` & `DELETE /api/v1/folders/:id/permanent`: Specific endpoints for permanent folder deletion.
+- `DELETE /api/v1/trash/empty`: Permanently deletes all items in trash for authenticated user.
+
+### Frontend Integration
+- `client/src/types/trash.types.ts`: TypeScript interfaces for `TrashItem`, `TrashPaginationMeta`, `PaginatedTrashResponse`, `ListTrashOptions`.
+- `client/src/services/trash.service.ts`: API service for listing, restoring, and permanently deleting trash items.
+- `client/src/pages/Trash.tsx`:
+  - Full-featured trash management page with Grid View and List View.
+  - Filter pills for "All Items", "Folders", and "Files".
+  - Search filter input for rapid item lookup.
+  - Direct "Restore" action with instant status notification and storage quota sync.
+  - "Delete Forever" action with confirmation modal.
+  - "Empty Trash" top-level action with safety confirmation modal.
+  - Pagination controls for navigating large trash histories.
+- `client/src/pages/Drive.tsx` & `client/src/pages/Shared.tsx`:
+  - Added "Trash" navigation link with `Trash2` icon to top header toolbar.
+- `client/src/App.tsx`:
+  - Added `/trash` route to application router.
+  - Added Trash quick link to Dashboard authenticated hero section.
+  - Updated Architecture Phase Roadmap to mark Phase 10 as `Implemented`.
+
+### Verification
+- 15 automated tests in `server/tests/trash.test.ts` covering soft deletion metadata, folder cascading soft deletion, user isolation, trash listing, original and fallback restoration, collision renaming, cascading restore, permanent deletion of files/versions/storage, folder permanent deletion, non-trashed deletion rejection, empty trash, and background cleanup.
+- Full workspace test suite: 192 passed tests across 12 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 11 — Search and Storage Quotas
 Status: NOT STARTED

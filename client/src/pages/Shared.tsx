@@ -25,6 +25,7 @@ import {
   X,
   Check,
   History,
+  Trash2,
 } from 'lucide-react';
 import { shareService } from '../services/share.service.js';
 import { fileService } from '../services/file.service.js';
@@ -299,6 +300,15 @@ export const Shared: React.FC = () => {
           >
             <Users size={15} />
             <span>Shared with me</span>
+          </Link>
+
+          <Link
+            to="/trash"
+            className="btn btn-secondary"
+            style={{ fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <Trash2 size={15} />
+            <span>Trash</span>
           </Link>
 
           {user && (

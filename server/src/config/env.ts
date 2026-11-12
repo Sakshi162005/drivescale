@@ -30,6 +30,9 @@ const envSchema = z.object({
   BULLMQ_FAILED_RETENTION_COUNT: z.coerce.number().default(500),
   BULLMQ_FAILED_RETENTION_AGE_SECONDS: z.coerce.number().default(604800), // 7 days
   BULLMQ_CLEANUP_INTERVAL_MS: z.coerce.number().default(3600000), // 1 hour
+  // Trash & Recovery configuration
+  TRASH_RETENTION_DAYS: z.coerce.number().default(30),
+  TRASH_CLEANUP_BATCH_SIZE: z.coerce.number().default(100),
   CLIENT_URL: z.string().default('http://localhost:5173'),
   LOG_LEVEL: z.string().optional().default('info'),
   JWT_ACCESS_SECRET: z.string().default('drivescale-development-access-secret-32-chars-min!'),

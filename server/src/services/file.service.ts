@@ -524,6 +524,9 @@ export class FileService {
 
     file.isDeleted = true;
     file.deletedAt = new Date();
+    file.deletedBy = new mongoose.Types.ObjectId(ownerId);
+    file.originalFolderId = file.folderId;
+    file.deletedWithFolderId = null;
     await file.save();
 
     // Decrement user storage usage
@@ -533,9 +536,10 @@ export class FileService {
 
     logger.info({ fileId, size: file.size, ownerId: file.ownerId }, 'File soft deleted successfully');
 
-    // Invalidate file cache, listings, and storage stats
+    // Invalidate file cache, listings, storage stats, and trash
     await cacheService.del(CacheKeys.fileDetail(file.ownerId.toString(), fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(file.ownerId.toString()));
+    await cacheService.delByPattern(CacheKeys.userAllTrashPattern(file.ownerId.toString()));
     await cacheService.del(CacheKeys.userStorageStats(file.ownerId.toString()));
   }
 }

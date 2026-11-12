@@ -7,6 +7,7 @@ import {
   renameFolderSchema,
   moveFolderSchema,
 } from '../schemas/folder.schema.js';
+import { restoreFolder, permanentlyDeleteFolder } from '../controllers/trash.controller.js';
 
 const router = Router();
 
@@ -35,6 +36,12 @@ router.patch(
 );
 
 router.delete('/:id', folderController.deleteFolder);
+
+// Restore folder from trash
+router.post('/:id/restore', restoreFolder);
+
+// Permanently delete folder from trash
+router.delete('/:id/permanent', permanentlyDeleteFolder);
 
 router.post(
   '/:id/move',

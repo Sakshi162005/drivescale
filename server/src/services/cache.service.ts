@@ -165,6 +165,14 @@ export const CacheKeys = {
   userAllSharesPattern: (userId: string) =>
     `drivescale:user:${userId}:shares:*`,
 
+  // User trash listing
+  trashList: (userId: string, type = 'all', page = 1, limit = 50) =>
+    `drivescale:user:${userId}:trash:${type}:p${page}_l${limit}`,
+
+  // Pattern matcher for user's trash listings
+  userAllTrashPattern: (userId: string) =>
+    `drivescale:user:${userId}:trash:*`,
+
   // Pattern matchers for user-scoped invalidation
   userAllFoldersPattern: (userId: string) =>
     `drivescale:user:${userId}:folder:*`,

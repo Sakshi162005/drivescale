@@ -43,7 +43,7 @@ export const startWorkerProcess = async (): Promise<void> => {
     const fileWorker = createFileWorker();
     const notificationWorker = createNotificationWorker();
 
-    // 4. Schedule periodic repeatable cleanup job for expired upload sessions
+    // 4. Schedule periodic repeatable cleanup job for expired upload sessions and expired trash
     const cleanupQueue = getCleanupQueue();
     await cleanupQueue.upsertJobScheduler(
       'periodic-expired-upload-cleanup',
@@ -51,6 +51,19 @@ export const startWorkerProcess = async (): Promise<void> => {
       {
         name: CLEANUP_JOB_NAMES.CLEANUP_EXPIRED_UPLOAD,
         data: { batchSize: 50, triggeredAt: new Date().toISOString() },
+        opts: { removeOnComplete: true },
+      }
+    );
+
+    await cleanupQueue.upsertJobScheduler(
+      'periodic-trash-cleanup',
+      { every: env.BULLMQ_CLEANUP_INTERVAL_MS },
+      {
+        name: CLEANUP_JOB_NAMES.CLEANUP_TRASH,
+        data: {
+          olderThanDays: env.TRASH_RETENTION_DAYS,
+          batchSize: env.TRASH_CLEANUP_BATCH_SIZE,
+        },
         opts: { removeOnComplete: true },
       }
     );

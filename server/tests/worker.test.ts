@@ -55,6 +55,7 @@ import {
 } from '../src/workers/notification.worker.js';
 import { UploadSession } from '../src/models/UploadSession.js';
 import { storageService } from '../src/services/storage/index.js';
+import { trashService } from '../src/services/trash.service.js';
 
 describe('Phase 7 Background Workers & Queue Infrastructure Test Suite', () => {
   beforeEach(() => {
@@ -298,19 +299,22 @@ describe('Phase 7 Background Workers & Queue Infrastructure Test Suite', () => {
       await expect(processCleanupJob(badJob)).rejects.toThrow(UnrecoverableError);
     });
 
-    it('processes trash cleanup scaffold without deleting files ahead of Phase 10', async () => {
+    it('processes trash cleanup job and invokes trashService', async () => {
       const trashJob = {
         id: 'job_trash_scaffold',
         name: CLEANUP_JOB_NAMES.CLEANUP_TRASH,
         data: { olderThanDays: 30, batchSize: 100 },
       } as unknown as Job;
 
-      const deleteSpy = vi.spyOn(storageService, 'delete').mockResolvedValue();
+      const trashSpy = vi.spyOn(trashService, 'cleanupExpiredTrash').mockResolvedValue({
+        cleanedFilesCount: 0,
+        cleanedFoldersCount: 0,
+      });
 
       const result = await processCleanupJob(trashJob);
-      expect(result.scaffold).toBe(true);
-      expect(result.cleanedCount).toBe(0);
-      expect(deleteSpy).not.toHaveBeenCalled();
+      expect(result.olderThanDays).toBe(30);
+      expect(result.batchSize).toBe(100);
+      expect(trashSpy).toHaveBeenCalledWith(30, 100);
     });
   });
 

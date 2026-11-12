@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { renameFileSchema, moveFileSchema } from '../schemas/file.schema.js';
 import { versionRoutes } from './version.routes.js';
+import { restoreFile, permanentlyDeleteFile } from '../controllers/trash.controller.js';
 
 const router = Router();
 
@@ -41,7 +42,13 @@ router.patch(
   fileController.renameFile
 );
 
-// Delete file
+// Delete file (soft-delete to trash)
 router.delete('/:id', fileController.deleteFile);
+
+// Restore file from trash
+router.post('/:id/restore', restoreFile);
+
+// Permanently delete file from trash
+router.delete('/:id/permanent', permanentlyDeleteFile);
 
 export const fileRoutes = router;

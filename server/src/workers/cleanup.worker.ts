@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { UploadSession } from '../models/UploadSession.js';
 import { storageService } from '../services/storage/index.js';
+import { trashService } from '../services/trash.service.js';
 import {
   cleanupExpiredUploadPayloadSchema,
   cleanupTrashPayloadSchema,
@@ -93,14 +94,26 @@ export const processCleanupJob = async (job: Job) => {
       const { olderThanDays, batchSize } = parseResult.data;
       logger.info(
         { jobId: job.id, olderThanDays, batchSize },
-        'Trash cleanup scaffold processed (Phase 10 placeholder - files preserved)'
+        'Starting automatic trash cleanup'
+      );
+
+      const result = await trashService.cleanupExpiredTrash(olderThanDays, batchSize);
+
+      logger.info(
+        {
+          jobId: job.id,
+          cleanedFilesCount: result.cleanedFilesCount,
+          cleanedFoldersCount: result.cleanedFoldersCount,
+        },
+        'Automatic trash cleanup completed successfully'
       );
 
       return {
-        scaffold: true,
+        scaffold: false,
         olderThanDays,
         batchSize,
-        cleanedCount: 0,
+        cleanedFilesCount: result.cleanedFilesCount,
+        cleanedFoldersCount: result.cleanedFoldersCount,
       };
     }
 

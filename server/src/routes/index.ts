@@ -6,6 +6,7 @@ import { folderRoutes } from './folder.routes.js';
 import { fileRoutes } from './file.routes.js';
 import { uploadRoutes } from './upload.routes.js';
 import { shareRoutes } from './share.routes.js';
+import { trashRoutes } from './trash.routes.js';
 
 const router = Router();
 
@@ -29,5 +30,8 @@ router.use('/uploads', uploadRoutes);
 
 // Phase 8: Sharing routes
 router.use('/shares', shareRoutes);
+
+// Phase 10: Trash & Recovery routes
+router.use('/trash', trashRoutes);
 
 export const apiV1Routes = router;

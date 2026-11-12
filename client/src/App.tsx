@@ -17,12 +17,14 @@ import {
   LogOut,
   HardDrive,
   Folder as FolderIcon,
+  Trash2,
 } from 'lucide-react';
 import { useAuthStore } from './stores/auth.store.js';
 import { Login } from './pages/Login.js';
 import { Register } from './pages/Register.js';
 import { Drive } from './pages/Drive.js';
 import { Shared } from './pages/Shared.js';
+import { Trash } from './pages/Trash.js';
 
 interface HealthResponse {
   success: boolean;
@@ -209,10 +211,16 @@ const Dashboard: React.FC = () => {
 
         <div className="actions-bar">
           {isAuthenticated && (
-            <Link to="/drive" className="btn btn-primary">
-              <FolderIcon size={16} />
-              Open My Drive
-            </Link>
+            <>
+              <Link to="/drive" className="btn btn-primary">
+                <FolderIcon size={16} />
+                Open My Drive
+              </Link>
+              <Link to="/trash" className="btn btn-secondary">
+                <Trash2 size={16} />
+                Trash
+              </Link>
+            </>
           )}
           <button
             className={isAuthenticated ? 'btn btn-secondary' : 'btn btn-primary'}
@@ -400,10 +408,17 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 9: File Versioning</p>
               <p className="phase-item-sub">Version history, immutability, rollbacks</p>
+            </div>
+            <span className="badge-tag active">Implemented</span>
+          </div>
+          <div className="phase-item active">
+            <div>
+              <p className="phase-item-title">Phase 10: Trash & Recovery</p>
+              <p className="phase-item-sub">Soft delete, cascade, restoration, auto-cleanup</p>
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
@@ -447,6 +462,7 @@ export const App: React.FC = () => {
         <Route path="/drive/:folderId" element={<Drive />} />
         <Route path="/shared" element={<Shared />} />
         <Route path="/shared/:folderId" element={<Shared />} />
+        <Route path="/trash" element={<Trash />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
       </Routes>
