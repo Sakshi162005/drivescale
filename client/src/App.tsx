@@ -22,6 +22,7 @@ import { useAuthStore } from './stores/auth.store.js';
 import { Login } from './pages/Login.js';
 import { Register } from './pages/Register.js';
 import { Drive } from './pages/Drive.js';
+import { Shared } from './pages/Shared.js';
 
 interface HealthResponse {
   success: boolean;
@@ -371,19 +372,40 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 3: File Storage</p>
               <p className="phase-item-sub">Streamed uploads & downloads</p>
             </div>
-            <span className="badge-tag next">Upcoming</span>
+            <span className="badge-tag active">Implemented</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 4-5: Chunked & Resumable</p>
               <p className="phase-item-sub">Multi-part streaming upload sessions</p>
             </div>
-            <span className="badge-tag upcoming">Planned</span>
+            <span className="badge-tag active">Implemented</span>
+          </div>
+          <div className="phase-item active">
+            <div>
+              <p className="phase-item-title">Phase 6-7: Redis & BullMQ Workers</p>
+              <p className="phase-item-sub">Caching, rate limiting, async job workers</p>
+            </div>
+            <span className="badge-tag active">Implemented</span>
+          </div>
+          <div className="phase-item active">
+            <div>
+              <p className="phase-item-title">Phase 8: Sharing & Permissions</p>
+              <p className="phase-item-sub">VIEW, DOWNLOAD, EDIT permissions & inheritance</p>
+            </div>
+            <span className="badge-tag active">Implemented</span>
+          </div>
+          <div className="phase-item">
+            <div>
+              <p className="phase-item-title">Phase 9: File Versioning</p>
+              <p className="phase-item-sub">Version history, immutability, rollbacks</p>
+            </div>
+            <span className="badge-tag next">Upcoming</span>
           </div>
           <div className="phase-item">
             <div>
@@ -423,6 +445,8 @@ export const App: React.FC = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/drive" element={<Drive />} />
         <Route path="/drive/:folderId" element={<Drive />} />
+        <Route path="/shared" element={<Shared />} />
+        <Route path="/shared/:folderId" element={<Shared />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
       </Routes>

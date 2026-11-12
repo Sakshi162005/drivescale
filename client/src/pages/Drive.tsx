@@ -27,6 +27,8 @@ import {
   Music,
   Archive,
   Code,
+  Share2,
+  Users,
 } from 'lucide-react';
 import { folderService } from '../services/folder.service.js';
 import { fileService } from '../services/file.service.js';
@@ -35,6 +37,7 @@ import { useAuthStore } from '../stores/auth.store.js';
 import { Folder, BreadcrumbItem } from '../types/folder.types.js';
 import { FileItem } from '../types/file.types.js';
 import { ActiveUploadMetadata } from '../types/upload.types.js';
+import { ShareModal } from '../components/sharing/ShareModal.js';
 
 export const Drive: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
@@ -109,6 +112,13 @@ export const Drive: React.FC = () => {
   const [deleteFileError, setDeleteFileError] = useState<string | null>(null);
 
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+  // Sharing state
+  const [resourceToShare, setResourceToShare] = useState<{
+    type: 'FILE' | 'FOLDER';
+    id: string;
+    name: string;
+  } | null>(null);
 
   // Authentication check
   useEffect(() => {
@@ -501,7 +511,16 @@ export const Drive: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <Link
+            to="/shared"
+            className="btn btn-secondary"
+            style={{ fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <Users size={15} />
+            <span>Shared with me</span>
+          </Link>
+
           <Link to="/" className="btn btn-secondary" style={{ fontSize: '0.8125rem' }}>
             System Status
           </Link>
@@ -831,6 +850,20 @@ export const Drive: React.FC = () => {
                             <button
                               className="dropdown-item"
                               onClick={() => {
+                                setResourceToShare({
+                                  type: 'FOLDER',
+                                  id: folder._id,
+                                  name: folder.name,
+                                });
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Share2 size={14} />
+                              <span>Share</span>
+                            </button>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
                                 setFolderToRename(folder);
                                 setRenameFolderVal(folder.name);
                                 setOpenDropdownId(null);
@@ -909,6 +942,20 @@ export const Drive: React.FC = () => {
 
                         {openDropdownId === file._id && (
                           <div className="dropdown-menu" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
+                                setResourceToShare({
+                                  type: 'FILE',
+                                  id: file._id,
+                                  name: file.name,
+                                });
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <Share2 size={14} />
+                              <span>Share</span>
+                            </button>
                             <button
                               className="dropdown-item"
                               onClick={() => {
@@ -993,6 +1040,19 @@ export const Drive: React.FC = () => {
                   <button
                     className="icon-action-btn"
                     onClick={() => {
+                      setResourceToShare({
+                        type: 'FOLDER',
+                        id: folder._id,
+                        name: folder.name,
+                      });
+                    }}
+                    title="Share folder"
+                  >
+                    <Share2 size={14} />
+                  </button>
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => {
                       setFolderToRename(folder);
                       setRenameFolderVal(folder.name);
                     }}
@@ -1037,6 +1097,19 @@ export const Drive: React.FC = () => {
                   {new Date(file.updatedAt).toLocaleDateString()}
                 </div>
                 <div className="list-actions-col">
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => {
+                      setResourceToShare({
+                        type: 'FILE',
+                        id: file._id,
+                        name: file.name,
+                      });
+                    }}
+                    title="Share file"
+                  >
+                    <Share2 size={14} />
+                  </button>
                   <button
                     className="icon-action-btn"
                     onClick={() => handleDownloadFile(file)}
@@ -1496,6 +1569,16 @@ export const Drive: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* Share Modal */}
+      {resourceToShare && (
+        <ShareModal
+          isOpen={Boolean(resourceToShare)}
+          onClose={() => setResourceToShare(null)}
+          resourceType={resourceToShare.type}
+          resourceId={resourceToShare.id}
+          resourceName={resourceToShare.name}
+        />
       )}
     </div>
   );

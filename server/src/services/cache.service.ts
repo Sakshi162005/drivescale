@@ -149,6 +149,14 @@ export const CacheKeys = {
   userStorageStats: (userId: string) =>
     `drivescale:user:${userId}:storage:stats`,
 
+  // Shared with user listing
+  sharedWithMeList: (userId: string, type = 'all', page = 1, limit = 20) =>
+    `drivescale:user:${userId}:shares:with-me:${type}:p${page}_l${limit}`,
+
+  // Pattern matcher for user's share listings
+  userAllSharesPattern: (userId: string) =>
+    `drivescale:user:${userId}:shares:*`,
+
   // Pattern matchers for user-scoped invalidation
   userAllFoldersPattern: (userId: string) =>
     `drivescale:user:${userId}:folder:*`,

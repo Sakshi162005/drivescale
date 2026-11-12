@@ -18,6 +18,12 @@ export class UnauthorizedError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message = 'Access forbidden', code = 'FORBIDDEN') {
+    super(message, 403, code);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message = 'Resource already exists', code = 'CONFLICT') {
     super(message, 409, code);

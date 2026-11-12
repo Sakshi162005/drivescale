@@ -8,6 +8,7 @@ import { storageService, IStorageService } from './storage/index.js';
 import { cacheService, CacheKeys } from './cache.service.js';
 import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
 import { enqueueNotification } from '../queues/notification.queue.js';
+import { permissionService } from './permission.service.js';
 import { InitUploadInput, DEFAULT_CHUNK_SIZE } from '../schemas/upload.schema.js';
 import {
   BadRequestError,
@@ -79,7 +80,8 @@ export class UploadService {
         throw new NotFoundError('Destination folder not found', 'FOLDER_NOT_FOUND');
       }
 
-      if (folder.ownerId.toString() !== userId) {
+      const canEdit = await permissionService.canEditFolder(userId, folder);
+      if (!canEdit) {
         throw new UnauthorizedError('You do not have permission to upload to this folder', 'FORBIDDEN');
       }
 

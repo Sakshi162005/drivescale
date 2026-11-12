@@ -197,7 +197,89 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 8 — Sharing and Permissions
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Share Model (`server/src/models/Share.ts`)**:
+  - Fully typed Mongoose model supporting both file and folder sharing with fields: `ownerId` (ref User), `recipientId` (ref User), virtual alias `userId` (for recipientId compatibility), `resourceType` (`FILE` | `FOLDER`), `resourceId` (ObjectId), `permission` (`VIEW` | `DOWNLOAD` | `EDIT`), optional `expiresAt` (Date TTL), and timestamps.
+  - Compound indexes for high-performance querying and integrity enforcement:
+    - Unique compound index `{ resourceType: 1, resourceId: 1, recipientId: 1 }` preventing duplicate active shares for the same recipient on the same resource.
+    - Index `{ recipientId: 1, resourceType: 1, createdAt: -1 }` for fast retrieval of resources shared with a user.
+    - Index `{ ownerId: 1, resourceType: 1, resourceId: 1 }` for fast retrieval of shares created by an owner.
+- **Centralized Permission Service (`server/src/services/permission.service.ts`)**:
+  - Implements a unified authorization engine enforcing permissions across both file and folder operations:
+    - `getFilePermission(userId, file)` & `getFolderPermission(userId, folder)`
+    - Permission levels: `OWNER`, `EDIT`, `DOWNLOAD`, `VIEW`, `null` (no access).
+    - Permission hierarchy: `EDIT > DOWNLOAD > VIEW`.
+    - Helper methods: `canView`, `canRead`, `canDownload`, `canEdit`, `canDelete`, `canShare`.
+  - **Folder Inheritance**: When a folder is shared with a recipient, all nested files and subfolders automatically inherit the folder's permissions down the hierarchy.
+  - **Most-Permissive Resolution**: If a file or subfolder has both a direct share and an inherited ancestor folder share, the most permissive permission wins (`EDIT > DOWNLOAD > VIEW`).
+  - **Cycle-Safe Traversal**: `getAncestorFolderIds` uses visited-set tracking to detect and safely terminate upon encountering folder hierarchy cycles.
+  - **Cross-Owner Boundaries**: Folder inheritance strictly enforces matching resource ownership, preventing unauthorized privilege escalation across user boundaries.
+- **Enforcement on Core APIs**:
+  - `FileService`:
+    - `getFile`: Allowed for `VIEW`, `DOWNLOAD`, `EDIT`, `OWNER`.
+    - `getFileForDownload`: Blocked for `VIEW` (403 Forbidden); permitted for `DOWNLOAD`, `EDIT`, `OWNER`.
+    - `renameFile`: Blocked for `VIEW` and `DOWNLOAD` (403 Forbidden); permitted for `EDIT` and `OWNER`.
+    - `moveFile` & `deleteFile`: Permitted only for resource `OWNER`.
+  - `FolderService`:
+    - `getFolder` & `getFolderChildren`: Allowed for `VIEW`, `DOWNLOAD`, `EDIT`, `OWNER`.
+    - `renameFolder`: Blocked for `VIEW` and `DOWNLOAD` (403 Forbidden); permitted for `EDIT` and `OWNER`.
+    - `deleteFolder` & `moveFolder`: Permitted only for resource `OWNER`.
+  - `UploadService`:
+    - `initUpload`: Verifies destination folder permission with `canEditFolder(userId, folder)`.
+- **Redis Cache Integration & Invalidation**:
+  - User shares list cached with pattern `drivescale:user:<userId>:shares:*`.
+  - Share mutations (create, update permission, revoke) trigger immediate cache invalidations for recipient's shares, folders, and files caches.
+
+### Endpoints
+- `POST /api/v1/shares/files/:fileId`: Share a file with another user by email or user ID (`VIEW`, `DOWNLOAD`, `EDIT`).
+- `GET /api/v1/shares/files/:fileId`: List all active shares on a file (owner only).
+- `PATCH /api/v1/shares/files/:fileId/:shareId`: Update permission on a file share (owner only).
+- `DELETE /api/v1/shares/files/:fileId/:shareId`: Revoke a file share immediately (owner only).
+- `POST /api/v1/shares/folders/:folderId`: Share a folder with another user by email or user ID (`VIEW`, `DOWNLOAD`, `EDIT`).
+- `GET /api/v1/shares/folders/:folderId`: List all active shares on a folder (owner only).
+- `PATCH /api/v1/shares/folders/:folderId/:shareId`: Update permission on a folder share (owner only).
+- `DELETE /api/v1/shares/folders/:folderId/:shareId`: Revoke a folder share immediately (owner only).
+- `POST /api/v1/shares`: General share endpoint accepting `{ resourceType, resourceId, recipientEmail, permission, expiresAt }`.
+- `PATCH /api/v1/shares/:id`: General share permission update.
+- `DELETE /api/v1/shares/:id`: General share revocation.
+- `GET /api/v1/shares/with-me`: Returns paginated list of all files and folders shared with the authenticated user, populated with owner info, direct/effective permissions, and metadata.
+- `GET /api/v1/shares/with-me/folders/:folderId`: Returns child folders and files inside a shared folder respecting inherited permissions.
+
+### Frontend Integration
+- `client/src/types/share.types.ts`: TypeScript definitions for share models, inputs, responses, and effective permissions.
+- `client/src/services/share.service.ts`: API client functions for sharing, listing, updating, revoking, and navigating shared resources.
+- `client/src/components/sharing/ShareModal.tsx`:
+  - Recipient email input and permission selector (`VIEW`, `DOWNLOAD`, `EDIT`).
+  - Active shares listing showing recipients, avatar badges, current permissions, and inline revocation button.
+  - Inline permission modification dropdown.
+  - Explanatory callout of the permission hierarchy.
+- `client/src/pages/Shared.tsx`:
+  - Dedicated `/shared` page route with quick navigation between "My Drive" and "Shared with me".
+  - Sectioned display of shared folders and shared files with owner badges, permission pills, and file type icons.
+  - Subfolder hierarchy navigation (`/shared/:folderId`) with breadcrumb trails and effective permission banners.
+  - Permission-aware action controls: Download button hidden/disabled for `VIEW` users; Rename enabled for `EDIT` users.
+- `client/src/pages/Drive.tsx`:
+  - Added "Share" option to folder and file dropdown menus in both Grid and List views.
+  - Added "Shared with me" header navigation button.
+  - Modal integration triggering `<ShareModal>`.
+- `client/src/App.tsx`:
+  - Registered `/shared` and `/shared/:folderId` routes.
+  - Updated Architecture Phase Roadmap to display Phase 8 as Implemented.
+
+### Verification
+- 28 automated tests in `server/tests/share.test.ts` covering:
+  - Centralized permission evaluation, hierarchy validation (`EDIT > DOWNLOAD > VIEW`), and expiration handling.
+  - Recursive folder inheritance, ancestor cycle safety, and most-permissive conflict resolution.
+  - Self-share prevention (400), non-owner sharing rejection (403), and share upsert behavior.
+  - File and folder sharing CRUD endpoints, cache invalidation, and response formats.
+  - Permission enforcement on file metadata vs download (blocking `VIEW` with 403) and rename (blocking `VIEW`/`DOWNLOAD` with 403, allowing `EDIT`).
+  - Permission enforcement on folder details vs rename.
+- Full project test suite: 163 passed tests across 10 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces.
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 9 — File Versioning
 Status: NOT STARTED

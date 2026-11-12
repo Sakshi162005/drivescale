@@ -2,9 +2,11 @@ import mongoose, { Types } from 'mongoose';
 import { Folder, IFolder } from '../models/Folder.js';
 import { CreateFolderInput } from '../schemas/folder.schema.js';
 import { cacheService, CacheKeys } from './cache.service.js';
+import { permissionService } from './permission.service.js';
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from '../utils/errors.js';
@@ -33,7 +35,8 @@ export class FolderService {
         throw new NotFoundError('Parent folder not found', 'PARENT_NOT_FOUND');
       }
 
-      if (parentFolder.ownerId.toString() !== ownerId) {
+      const canEdit = await permissionService.canEditFolder(ownerId, parentFolder);
+      if (!canEdit) {
         throw new UnauthorizedError('You do not have permission to create folders in this directory', 'FORBIDDEN');
       }
 
@@ -105,7 +108,8 @@ export class FolderService {
       throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
     }
 
-    if (folder.ownerId.toString() !== ownerId) {
+    const canView = await permissionService.canViewFolder(ownerId, folder);
+    if (!canView) {
       throw new UnauthorizedError('You do not have permission to access this folder', 'FORBIDDEN');
     }
 
@@ -138,7 +142,8 @@ export class FolderService {
         throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
       }
 
-      if (parent.ownerId.toString() !== ownerId) {
+      const canView = await permissionService.canViewFolder(ownerId, parent);
+      if (!canView) {
         throw new UnauthorizedError('You do not have permission to access this folder', 'FORBIDDEN');
       }
 
@@ -168,7 +173,12 @@ export class FolderService {
       throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
     }
 
-    if (folder.ownerId.toString() !== ownerId) {
+    const canEdit = await permissionService.canEditFolder(ownerId, folder);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFolder(ownerId, folder);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to rename this folder', 'FORBIDDEN');
+      }
       throw new UnauthorizedError('You do not have permission to rename this folder', 'FORBIDDEN');
     }
 
@@ -219,7 +229,12 @@ export class FolderService {
       throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
     }
 
-    if (folder.ownerId.toString() !== ownerId) {
+    const canEdit = await permissionService.canEditFolder(ownerId, folder);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFolder(ownerId, folder);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to delete this folder', 'FORBIDDEN');
+      }
       throw new UnauthorizedError('You do not have permission to delete this folder', 'FORBIDDEN');
     }
 
@@ -259,7 +274,12 @@ export class FolderService {
       throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
     }
 
-    if (folder.ownerId.toString() !== ownerId) {
+    const canEdit = await permissionService.canEditFolder(ownerId, folder);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFolder(ownerId, folder);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to move this folder', 'FORBIDDEN');
+      }
       throw new UnauthorizedError('You do not have permission to move this folder', 'FORBIDDEN');
     }
 
@@ -280,7 +300,8 @@ export class FolderService {
         throw new NotFoundError('Destination folder not found', 'DESTINATION_NOT_FOUND');
       }
 
-      if (targetParent.ownerId.toString() !== ownerId) {
+      const canEditDest = await permissionService.canEditFolder(ownerId, targetParent);
+      if (!canEditDest) {
         throw new UnauthorizedError('You do not have permission to move to this destination', 'FORBIDDEN');
       }
 

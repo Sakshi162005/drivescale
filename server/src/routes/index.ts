@@ -5,6 +5,7 @@ import { userRoutes } from './user.routes.js';
 import { folderRoutes } from './folder.routes.js';
 import { fileRoutes } from './file.routes.js';
 import { uploadRoutes } from './upload.routes.js';
+import { shareRoutes } from './share.routes.js';
 
 const router = Router();
 
@@ -25,5 +26,8 @@ router.use('/files', fileRoutes);
 
 // Phase 4: Chunked upload routes
 router.use('/uploads', uploadRoutes);
+
+// Phase 8: Sharing routes
+router.use('/shares', shareRoutes);
 
 export const apiV1Routes = router;

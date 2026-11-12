@@ -7,9 +7,11 @@ import { storageService, IStorageService } from './storage/index.js';
 import { ListFilesQueryInput } from '../schemas/file.schema.js';
 import { cacheService, CacheKeys } from './cache.service.js';
 import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
+import { permissionService } from './permission.service.js';
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from '../utils/errors.js';
@@ -87,7 +89,8 @@ export class FileService {
         await cleanupAndThrow(new NotFoundError('Destination folder not found', 'FOLDER_NOT_FOUND'));
       }
 
-      if (folder!.ownerId.toString() !== ownerId) {
+      const canEdit = await permissionService.canEditFolder(ownerId, folder!);
+      if (!canEdit) {
         await cleanupAndThrow(new UnauthorizedError('You do not have permission to upload to this folder', 'FORBIDDEN'));
       }
 
@@ -195,11 +198,13 @@ export class FileService {
         throw new NotFoundError('Folder not found', 'FOLDER_NOT_FOUND');
       }
 
-      if (folder.ownerId.toString() !== ownerId) {
+      const canView = await permissionService.canViewFolder(ownerId, folder);
+      if (!canView) {
         throw new UnauthorizedError('You do not have permission to access this folder', 'FORBIDDEN');
       }
 
       filter['folderId'] = new Types.ObjectId(query.folderId);
+      filter['ownerId'] = folder.ownerId;
     }
 
     const sortField = query.sortBy || 'name';
@@ -252,7 +257,8 @@ export class FileService {
       throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
     }
 
-    if (file.ownerId.toString() !== ownerId) {
+    const canView = await permissionService.canViewFile(ownerId, file);
+    if (!canView) {
       throw new UnauthorizedError('You do not have permission to access this file', 'FORBIDDEN');
     }
 
@@ -264,7 +270,24 @@ export class FileService {
    * Retrieves file and creates readable stream for download
    */
   async getFileForDownload(ownerId: string, fileId: string): Promise<{ file: IFile; stream: NodeJS.ReadableStream }> {
-    const file = await this.getFile(ownerId, fileId);
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
+      throw new BadRequestError('Invalid file ID', 'INVALID_FILE_ID');
+    }
+
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
+    }
+
+    const canDownload = await permissionService.canDownloadFile(ownerId, file);
+    if (!canDownload) {
+      const canView = await permissionService.canViewFile(ownerId, file);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to download this file', 'FORBIDDEN');
+      }
+      throw new UnauthorizedError('You do not have permission to access this file', 'FORBIDDEN');
+    }
+
     const stream = await this.storage.createReadStream(file.storageKey);
     return { file, stream };
   }
@@ -278,7 +301,24 @@ export class FileService {
       throw new BadRequestError('File name cannot be empty', 'INVALID_FILE_NAME');
     }
 
-    const file = await this.getFile(ownerId, fileId);
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
+      throw new BadRequestError('Invalid file ID', 'INVALID_FILE_ID');
+    }
+
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
+    }
+
+    const canEdit = await permissionService.canEditFile(ownerId, file);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFile(ownerId, file);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to rename this file', 'FORBIDDEN');
+      }
+      throw new UnauthorizedError('You do not have permission to rename this file', 'FORBIDDEN');
+    }
+
     if (file.name === sanitizedName) {
       return file;
     }
@@ -315,7 +355,23 @@ export class FileService {
    * Moves a file to another folder or to root and invalidates file caches
    */
   async moveFile(ownerId: string, fileId: string, targetFolderId: string | null): Promise<IFile> {
-    const file = await this.getFile(ownerId, fileId);
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
+      throw new BadRequestError('Invalid file ID', 'INVALID_FILE_ID');
+    }
+
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
+    }
+
+    const canEdit = await permissionService.canEditFile(ownerId, file);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFile(ownerId, file);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to move this file', 'FORBIDDEN');
+      }
+      throw new UnauthorizedError('You do not have permission to move this file', 'FORBIDDEN');
+    }
 
     let normalizedTargetId: Types.ObjectId | null = null;
 
@@ -329,11 +385,17 @@ export class FileService {
         throw new NotFoundError('Destination folder not found', 'DESTINATION_NOT_FOUND');
       }
 
-      if (targetFolder.ownerId.toString() !== ownerId) {
+      const canEditDest = await permissionService.canEditFolder(ownerId, targetFolder);
+      if (!canEditDest) {
         throw new UnauthorizedError('You do not have permission to move files into this folder', 'FORBIDDEN');
       }
 
       normalizedTargetId = targetFolder._id as Types.ObjectId;
+    } else {
+      // Moving to root requires owning the file (cannot move shared file into recipient's root)
+      if (file.ownerId.toString() !== ownerId) {
+        throw new ForbiddenError('Cannot move shared file outside shared folder hierarchy', 'FORBIDDEN');
+      }
     }
 
     const currentFolderStr = file.folderId ? file.folderId.toString() : null;
@@ -384,7 +446,12 @@ export class FileService {
       throw new NotFoundError('File not found', 'FILE_NOT_FOUND');
     }
 
-    if (file.ownerId.toString() !== ownerId) {
+    const canEdit = await permissionService.canEditFile(ownerId, file);
+    if (!canEdit) {
+      const canView = await permissionService.canViewFile(ownerId, file);
+      if (canView) {
+        throw new ForbiddenError('You do not have permission to delete this file', 'FORBIDDEN');
+      }
       throw new UnauthorizedError('You do not have permission to delete this file', 'FORBIDDEN');
     }
 
@@ -393,16 +460,16 @@ export class FileService {
     await file.save();
 
     // Decrement user storage usage
-    await User.findByIdAndUpdate(ownerId, {
+    await User.findByIdAndUpdate(file.ownerId.toString(), {
       $inc: { storageUsed: -file.size },
     });
 
-    logger.info({ fileId, size: file.size, ownerId }, 'File soft deleted successfully');
+    logger.info({ fileId, size: file.size, ownerId: file.ownerId }, 'File soft deleted successfully');
 
     // Invalidate file cache, listings, and storage stats
-    await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
-    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
-    await cacheService.del(CacheKeys.userStorageStats(ownerId));
+    await cacheService.del(CacheKeys.fileDetail(file.ownerId.toString(), fileId));
+    await cacheService.delByPattern(CacheKeys.userAllFilesPattern(file.ownerId.toString()));
+    await cacheService.del(CacheKeys.userStorageStats(file.ownerId.toString()));
   }
 }
 
