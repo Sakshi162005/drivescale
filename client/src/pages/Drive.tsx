@@ -29,6 +29,7 @@ import {
   Code,
   Share2,
   Users,
+  History,
 } from 'lucide-react';
 import { folderService } from '../services/folder.service.js';
 import { fileService } from '../services/file.service.js';
@@ -38,6 +39,7 @@ import { Folder, BreadcrumbItem } from '../types/folder.types.js';
 import { FileItem } from '../types/file.types.js';
 import { ActiveUploadMetadata } from '../types/upload.types.js';
 import { ShareModal } from '../components/sharing/ShareModal.js';
+import { VersionHistoryModal } from '../components/version/VersionHistoryModal.js';
 
 export const Drive: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
@@ -119,6 +121,9 @@ export const Drive: React.FC = () => {
     id: string;
     name: string;
   } | null>(null);
+
+  // Version history state
+  const [fileForVersionHistory, setFileForVersionHistory] = useState<FileItem | null>(null);
 
   // Authentication check
   useEffect(() => {
@@ -959,6 +964,16 @@ export const Drive: React.FC = () => {
                             <button
                               className="dropdown-item"
                               onClick={() => {
+                                setFileForVersionHistory(file);
+                                setOpenDropdownId(null);
+                              }}
+                            >
+                              <History size={14} />
+                              <span>Version History</span>
+                            </button>
+                            <button
+                              className="dropdown-item"
+                              onClick={() => {
                                 handleDownloadFile(file);
                                 setOpenDropdownId(null);
                               }}
@@ -1109,6 +1124,13 @@ export const Drive: React.FC = () => {
                     title="Share file"
                   >
                     <Share2 size={14} />
+                  </button>
+                  <button
+                    className="icon-action-btn"
+                    onClick={() => setFileForVersionHistory(file)}
+                    title="Version History"
+                  >
+                    <History size={14} />
                   </button>
                   <button
                     className="icon-action-btn"
@@ -1578,6 +1600,22 @@ export const Drive: React.FC = () => {
           resourceType={resourceToShare.type}
           resourceId={resourceToShare.id}
           resourceName={resourceToShare.name}
+        />
+      )}
+
+      {/* Version History Modal */}
+      {fileForVersionHistory && (
+        <VersionHistoryModal
+          isOpen={Boolean(fileForVersionHistory)}
+          onClose={() => setFileForVersionHistory(null)}
+          fileId={fileForVersionHistory._id}
+          fileName={fileForVersionHistory.name}
+          canDownload={true}
+          canEdit={true}
+          onVersionChanged={() => {
+            loadFolderData();
+            initAuth();
+          }}
         />
       )}
     </div>

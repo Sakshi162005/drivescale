@@ -145,6 +145,14 @@ export const CacheKeys = {
   fileDetail: (userId: string, fileId: string) =>
     `drivescale:user:${userId}:file:${fileId}:meta`,
 
+  // File version history listing
+  fileVersionsList: (fileId: string) =>
+    `drivescale:file:${fileId}:versions`,
+
+  // Pattern matcher for file versions
+  fileAllVersionsPattern: (fileId: string) =>
+    `drivescale:file:${fileId}:versions*`,
+
   // User storage statistics (storageUsed, storageQuota)
   userStorageStats: (userId: string) =>
     `drivescale:user:${userId}:storage:stats`,

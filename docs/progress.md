@@ -282,7 +282,62 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 9 — File Versioning
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **FileVersion Model (`server/src/models/FileVersion.ts`)**:
+  - Dedicated Mongoose model storing file reference (`fileId`), sequential `versionNumber`, `storageKey`, `name`, `size`, `mimeType`, `checksum` (SHA-256), `uploadedBy` (ref User), and timestamps.
+  - Compound unique index `{ fileId: 1, versionNumber: 1 }` enforcing strictly sequential unique version numbering per file.
+  - Descending query index `{ fileId: 1, createdAt: -1 }` for high-performance retrieval of version history.
+- **File Model Synchronization (`server/src/models/File.ts`)**:
+  - `currentVersionId` points to the active `FileVersion` document.
+  - `versionCount` tracks the total number of versions (default: 1).
+  - Main file metadata (`storageKey`, `size`, `mimeType`, `checksum`, `name`) mirrors the current active version.
+- **Historical Immutability & Safe Restore**:
+  - Previous versions are never overwritten or deleted during restoration or replacement uploads.
+  - When a historical version is restored, its content stream is copied to a new storage key and registered as version $N+1$, ensuring historical auditability and an unbroken version chain.
+- **Permission & Authorization Integration**:
+  - Version access rules strictly inherit from the centralized permission system:
+    - Owners have full control to list, download, restore, and upload replacements.
+    - Recipients with `VIEW` permission can list versions.
+    - Recipients with `DOWNLOAD` permission can list and download historical versions.
+    - Recipients with `EDIT` permission can list, download, restore, and upload new replacement versions.
+    - Unauthenticated or unauthorized users are rejected with 401 Unauthorized or 403 Forbidden.
+- **Redis Cache Invalidation**:
+  - Version lists are cached with key pattern `drivescale:file:<fileId>:versions`.
+  - Cache is invalidated on new version uploads and version restorations.
+
+### Endpoints
+- `GET /api/v1/files/:fileId/versions`: Lists all versions of a file, sorted descending by version number, identifying the current active version and populated uploader info. Includes automatic fallback synthesis for legacy pre-Phase 9 files.
+- `GET /api/v1/files/:fileId/versions/:versionId`: Retrieves metadata for a specific file version.
+- `GET /api/v1/files/:fileId/versions/:versionId/download`: Streams historical version content with correct MIME type and Content-Disposition headers.
+- `POST /api/v1/files/:fileId/versions/:versionId/restore`: Restores an earlier version by creating a new version with its content, incrementing the version sequence.
+- `POST /api/v1/files/:fileId/versions`: Multipart/form-data streaming upload of a replacement version.
+
+### Frontend Integration
+- `client/src/types/version.types.ts`: TypeScript interfaces for `FileVersionItem`, `VersionListResponse`, and `VersionActionResponse`.
+- `client/src/services/version.service.ts`: API service for listing, downloading, restoring, and uploading replacement versions.
+- `client/src/components/version/VersionHistoryModal.tsx`:
+  - Rich modal displaying file name, version count, and scrollable version list.
+  - Each version row displays version badge (`v1`, `v2`, etc.), `CURRENT` badge for active version, formatted size, formatted date, uploader, and SHA-256 checksum preview.
+  - Authenticated historical version download action.
+  - Inline restore action with safety confirmation explaining non-destructive rollback.
+  - Direct "Upload Replacement" file input with real-time progress.
+- `client/src/pages/Drive.tsx`:
+  - Added "Version History" option with `History` icon to file dropdown menu in Grid View and List View.
+  - Modal integration triggering `<VersionHistoryModal>` with automatic refresh on version updates.
+- `client/src/pages/Shared.tsx`:
+  - Added "Version History" button with `History` icon to shared file cards (Grid View) and file rows (List View).
+  - Modal integration respecting shared permissions (`canDownload` and `canEdit`).
+- `client/src/App.tsx`:
+  - Updated Architecture Phase Roadmap to mark Phase 9 as `Implemented`.
+
+### Verification
+- 14 automated tests in `server/tests/version.test.ts` covering initial version creation, sequential version incrementing, replacement uploads, version listing, download streaming, restore flow, permission enforcement (`VIEW`, `DOWNLOAD`, `EDIT`), and 404/403 validation.
+- Full workspace test suite: 177 passed tests across 11 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 10 — Trash and Recovery
 Status: NOT STARTED

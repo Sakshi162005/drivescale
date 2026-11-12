@@ -405,7 +405,7 @@ const Dashboard: React.FC = () => {
               <p className="phase-item-title">Phase 9: File Versioning</p>
               <p className="phase-item-sub">Version history, immutability, rollbacks</p>
             </div>
-            <span className="badge-tag next">Upcoming</span>
+            <span className="badge-tag active">Implemented</span>
           </div>
           <div className="phase-item">
             <div>

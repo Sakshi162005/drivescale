@@ -25,12 +25,21 @@ export const uploadFile = (req: AuthenticatedRequest, res: Response, next: NextF
   }
 
   let folderId: string | null = (req.query['folderId'] as string) || null;
+  let replaceFileId: string | null =
+    (req.query['replaceFileId'] as string) ||
+    (req.query['fileId'] as string) ||
+    (req.params['fileId'] as string) ||
+    (req.params['id'] as string) ||
+    null;
   let uploadPromise: Promise<unknown> | null = null;
   let fileHandled = false;
 
   bb.on('field', (name: string, val: string) => {
     if (name === 'folderId') {
       folderId = val.trim() || null;
+    }
+    if (name === 'replaceFileId' || name === 'fileId') {
+      replaceFileId = val.trim() || null;
     }
   });
 
@@ -43,6 +52,7 @@ export const uploadFile = (req: AuthenticatedRequest, res: Response, next: NextF
       fileName: filename,
       mimeType: mimeType || 'application/octet-stream',
       stream: fileStream,
+      replaceFileId,
     });
     uploadPromise.catch(() => {});
   });

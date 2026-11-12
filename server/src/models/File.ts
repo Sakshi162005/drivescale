@@ -9,6 +9,7 @@ export interface IFile extends Document {
   mimeType: string;
   checksum: string;
   currentVersionId: Types.ObjectId | null;
+  versionCount?: number;
   isDeleted: boolean;
   deletedAt: Date | null;
   createdAt: Date;
@@ -60,6 +61,11 @@ const fileSchema = new Schema<IFile>(
       type: Schema.Types.ObjectId,
       ref: 'FileVersion',
       default: null,
+    },
+    versionCount: {
+      type: Number,
+      default: 1,
+      min: 1,
     },
     isDeleted: {
       type: Boolean,

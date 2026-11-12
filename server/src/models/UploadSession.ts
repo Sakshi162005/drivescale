@@ -18,6 +18,7 @@ export interface IUploadedChunk {
 
 export interface IUploadSession extends Document {
   userId: Types.ObjectId;
+  replaceFileId?: Types.ObjectId | null;
   fileName: string;
   folderId: Types.ObjectId | null;
   mimeType: string;
@@ -48,6 +49,12 @@ const uploadSessionSchema = new Schema<IUploadSession>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      index: true,
+    },
+    replaceFileId: {
+      type: Schema.Types.ObjectId,
+      ref: 'File',
+      default: null,
       index: true,
     },
     fileName: {

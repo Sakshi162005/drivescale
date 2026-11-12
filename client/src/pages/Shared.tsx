@@ -24,6 +24,7 @@ import {
   Shield,
   X,
   Check,
+  History,
 } from 'lucide-react';
 import { shareService } from '../services/share.service.js';
 import { fileService } from '../services/file.service.js';
@@ -36,6 +37,7 @@ import {
 } from '../types/share.types.js';
 import { FileItem } from '../types/file.types.js';
 import { Folder } from '../types/folder.types.js';
+import { VersionHistoryModal } from '../components/version/VersionHistoryModal.js';
 
 export const Shared: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
@@ -62,6 +64,14 @@ export const Shared: React.FC = () => {
   const [renameVal, setRenameVal] = useState<string>('');
   const [renameLoading, setRenameLoading] = useState<boolean>(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+
+  // Version history state
+  const [versionHistoryTarget, setVersionHistoryTarget] = useState<{
+    fileId: string;
+    fileName: string;
+    canDownload: boolean;
+    canEdit: boolean;
+  } | null>(null);
 
   // Auth redirect
   useEffect(() => {
@@ -513,6 +523,20 @@ export const Shared: React.FC = () => {
                         </div>
 
                         <div style={{ display: 'flex', gap: '0.25rem', padding: '0.5rem' }}>
+                          <button
+                            className="folder-menu-btn"
+                            onClick={() =>
+                              setVersionHistoryTarget({
+                                fileId: item.resourceId,
+                                fileName: item.name,
+                                canDownload,
+                                canEdit,
+                              })
+                            }
+                            title="Version History"
+                          >
+                            <History size={15} />
+                          </button>
                           {canDownload && (
                             <button
                               className="folder-menu-btn"
@@ -620,6 +644,20 @@ export const Shared: React.FC = () => {
                         </div>
 
                         <div style={{ display: 'flex', gap: '0.25rem', padding: '0.5rem' }}>
+                          <button
+                            className="folder-menu-btn"
+                            onClick={() =>
+                              setVersionHistoryTarget({
+                                fileId: file._id,
+                                fileName: file.name,
+                                canDownload,
+                                canEdit,
+                              })
+                            }
+                            title="Version History"
+                          >
+                            <History size={15} />
+                          </button>
                           {canDownload && (
                             <button
                               className="folder-menu-btn"
@@ -693,7 +731,24 @@ export const Shared: React.FC = () => {
                     <div style={{ flex: 1, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                       {new Date(item.createdAt).toLocaleDateString()}
                     </div>
-                    <div style={{ width: '80px', display: 'flex', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                    <div style={{ width: '100px', display: 'flex', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                      {!isFolder && (
+                        <button
+                          className="folder-menu-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVersionHistoryTarget({
+                              fileId: item.resourceId,
+                              fileName: item.name,
+                              canDownload,
+                              canEdit,
+                            });
+                          }}
+                          title="Version History"
+                        >
+                          <History size={14} />
+                        </button>
+                      )}
                       {canDownload && (
                         <button
                           className="folder-menu-btn"
@@ -787,7 +842,22 @@ export const Shared: React.FC = () => {
                       <div style={{ flex: 1, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                         {new Date(file.updatedAt).toLocaleDateString()}
                       </div>
-                      <div style={{ width: '80px', display: 'flex', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                      <div style={{ width: '100px', display: 'flex', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                        <button
+                          className="folder-menu-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVersionHistoryTarget({
+                              fileId: file._id,
+                              fileName: file.name,
+                              canDownload,
+                              canEdit,
+                            });
+                          }}
+                          title="Version History"
+                        >
+                          <History size={14} />
+                        </button>
                         {canDownload && (
                           <button
                             className="folder-menu-btn"
@@ -868,6 +938,18 @@ export const Shared: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+      {/* Version History Modal */}
+      {versionHistoryTarget && (
+        <VersionHistoryModal
+          isOpen={Boolean(versionHistoryTarget)}
+          onClose={() => setVersionHistoryTarget(null)}
+          fileId={versionHistoryTarget.fileId}
+          fileName={versionHistoryTarget.fileName}
+          canDownload={versionHistoryTarget.canDownload}
+          canEdit={versionHistoryTarget.canEdit}
+          onVersionChanged={loadData}
+        />
       )}
     </div>
   );

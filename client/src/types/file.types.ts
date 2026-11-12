@@ -7,6 +7,8 @@ export interface FileItem {
   size: number;
   mimeType: string;
   checksum: string;
+  currentVersionId?: string | null;
+  versionCount?: number;
   isDeleted: boolean;
   deletedAt: string | null;
   createdAt: string;

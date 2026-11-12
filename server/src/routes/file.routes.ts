@@ -3,11 +3,16 @@ import * as fileController from '../controllers/file.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { renameFileSchema, moveFileSchema } from '../schemas/file.schema.js';
+import { versionRoutes } from './version.routes.js';
 
 const router = Router();
 
 // All file routes require authentication
 router.use(authenticate);
+
+// Version sub-routes (supports both :fileId/versions and :id/versions)
+router.use('/:fileId/versions', versionRoutes);
+router.use('/:id/versions', versionRoutes);
 
 // Upload endpoints
 router.post('/', fileController.uploadFile);

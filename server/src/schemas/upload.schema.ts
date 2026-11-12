@@ -22,6 +22,7 @@ export const initUploadSchema = z.object({
     .max(MAX_CHUNK_SIZE, `Chunk size cannot exceed ${MAX_CHUNK_SIZE} bytes`)
     .default(DEFAULT_CHUNK_SIZE),
   folderId: z.string().nullable().optional(),
+  replaceFileId: z.string().nullable().optional(),
   mimeType: z.string().optional().default('application/octet-stream'),
 });
 

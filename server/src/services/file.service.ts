@@ -8,6 +8,7 @@ import { ListFilesQueryInput } from '../schemas/file.schema.js';
 import { cacheService, CacheKeys } from './cache.service.js';
 import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
 import { permissionService } from './permission.service.js';
+import { versionService } from './version.service.js';
 import {
   BadRequestError,
   ConflictError,
@@ -22,6 +23,7 @@ export interface UploadFileInput {
   fileName: string;
   mimeType: string;
   stream: NodeJS.ReadableStream;
+  replaceFileId?: string | null;
 }
 
 export interface PaginatedFilesResult {
@@ -76,6 +78,64 @@ export class FileService {
       }
       throw err;
     };
+
+    // Case 1: Replacement upload for an existing file
+    if (input.replaceFileId) {
+      if (!mongoose.Types.ObjectId.isValid(input.replaceFileId)) {
+        await cleanupAndThrow(new BadRequestError('Invalid file ID to replace', 'INVALID_FILE_ID'));
+      }
+      const targetFile = await File.findById(input.replaceFileId);
+      if (!targetFile || targetFile.isDeleted) {
+        await cleanupAndThrow(new NotFoundError('File to replace not found', 'FILE_NOT_FOUND'));
+      }
+
+      const canEdit = await permissionService.canEditFile(ownerId, targetFile!);
+      if (!canEdit) {
+        await cleanupAndThrow(new ForbiddenError('You do not have permission to replace this file', 'FORBIDDEN'));
+      }
+
+      const user = await User.findById(ownerId);
+      if (!user) {
+        await cleanupAndThrow(new NotFoundError('User not found', 'USER_NOT_FOUND'));
+      }
+      if (user!.storageUsed + size > user!.storageQuota) {
+        await cleanupAndThrow(
+          new BadRequestError('Storage quota exceeded. Please free up space before uploading.', 'STORAGE_QUOTA_EXCEEDED')
+        );
+      }
+
+      try {
+        await User.findByIdAndUpdate(ownerId, { $inc: { storageUsed: size } });
+
+        await versionService.createNewVersion(targetFile!._id.toString(), ownerId, {
+          storageKey,
+          size,
+          checksum,
+          mimeType: input.mimeType || targetFile!.mimeType,
+          name: sanitizedName || targetFile!.name,
+        });
+
+        logger.info({ fileId: targetFile!._id, ownerId, size, storageKey }, 'File replacement uploaded successfully');
+
+        await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+        await cacheService.del(CacheKeys.userStorageStats(ownerId));
+
+        enqueueThumbnailGeneration({
+          fileId: targetFile!._id.toString(),
+          ownerId: targetFile!.ownerId.toString(),
+          mimeType: targetFile!.mimeType,
+          storageKey,
+        }).catch((err) => {
+          logger.warn({ fileId: targetFile!._id, err: err instanceof Error ? err.message : 'Unknown' }, 'Failed to enqueue thumbnail job');
+        });
+
+        return targetFile!;
+      } catch (dbError) {
+        await this.storage.delete(storageKey);
+        await User.findByIdAndUpdate(ownerId, { $inc: { storageUsed: -size } });
+        throw dbError;
+      }
+    }
 
     let normalizedFolderId: Types.ObjectId | null = null;
 
@@ -139,6 +199,13 @@ export class FileService {
         mimeType: input.mimeType || 'application/octet-stream',
         checksum,
       });
+
+      // Create initial version v1 record
+      try {
+        await versionService.createInitialVersion(file, ownerId);
+      } catch (verErr) {
+        logger.warn({ fileId: file._id, err: verErr }, 'Initial version creation notice');
+      }
 
       logger.info({ fileId: file._id, ownerId, size, storageKey }, 'File uploaded successfully');
 

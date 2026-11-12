@@ -9,10 +9,12 @@ import { cacheService, CacheKeys } from './cache.service.js';
 import { enqueueThumbnailGeneration } from '../queues/file.queue.js';
 import { enqueueNotification } from '../queues/notification.queue.js';
 import { permissionService } from './permission.service.js';
+import { versionService } from './version.service.js';
 import { InitUploadInput, DEFAULT_CHUNK_SIZE } from '../schemas/upload.schema.js';
 import {
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from '../utils/errors.js';
@@ -88,19 +90,34 @@ export class UploadService {
       normalizedFolderId = folder._id as Types.ObjectId;
     }
 
-    // Check duplicate file name in target folder
-    const existingFile = await File.findOne({
-      ownerId: new Types.ObjectId(userId),
-      folderId: normalizedFolderId,
-      name: sanitizedName,
-      isDeleted: false,
-    });
+    let targetReplaceFile: IFile | null = null;
+    if (input.replaceFileId) {
+      if (!mongoose.Types.ObjectId.isValid(input.replaceFileId)) {
+        throw new BadRequestError('Invalid file ID to replace', 'INVALID_FILE_ID');
+      }
+      targetReplaceFile = await File.findById(input.replaceFileId);
+      if (!targetReplaceFile || targetReplaceFile.isDeleted) {
+        throw new NotFoundError('File to replace not found', 'FILE_NOT_FOUND');
+      }
+      const canEdit = await permissionService.canEditFile(userId, targetReplaceFile);
+      if (!canEdit) {
+        throw new ForbiddenError('You do not have permission to replace this file', 'FORBIDDEN');
+      }
+    } else {
+      // Check duplicate file name in target folder
+      const existingFile = await File.findOne({
+        ownerId: new Types.ObjectId(userId),
+        folderId: normalizedFolderId,
+        name: sanitizedName,
+        isDeleted: false,
+      });
 
-    if (existingFile) {
-      throw new ConflictError(
-        `A file named '${sanitizedName}' already exists in this folder`,
-        'FILE_ALREADY_EXISTS'
-      );
+      if (existingFile) {
+        throw new ConflictError(
+          `A file named '${sanitizedName}' already exists in this folder`,
+          'FILE_ALREADY_EXISTS'
+        );
+      }
     }
 
     // Check user storage quota
@@ -124,6 +141,7 @@ export class UploadService {
 
     const session = await UploadSession.create({
       userId: new Types.ObjectId(userId),
+      replaceFileId: targetReplaceFile ? (targetReplaceFile._id as Types.ObjectId) : null,
       fileName: sanitizedName,
       folderId: normalizedFolderId,
       mimeType: input.mimeType || 'application/octet-stream',
@@ -388,16 +406,40 @@ export class UploadService {
       // Increment user storage quota
       await User.findByIdAndUpdate(userId, { $inc: { storageUsed: assembleResult.size } });
 
-      // Create File record in MongoDB
-      const file = await File.create({
-        name: updatedSession.fileName,
-        ownerId: updatedSession.userId,
-        folderId: updatedSession.folderId,
-        storageKey: updatedSession.storageKey,
-        size: assembleResult.size,
-        mimeType: updatedSession.mimeType,
-        checksum: assembleResult.checksum,
-      });
+      let file: IFile;
+      if (updatedSession.replaceFileId) {
+        // Replacement upload creates a new version of the existing file
+        const targetFile = await File.findById(updatedSession.replaceFileId);
+        if (!targetFile || targetFile.isDeleted) {
+          throw new NotFoundError('Target file to replace not found', 'FILE_NOT_FOUND');
+        }
+
+        await versionService.createNewVersion(targetFile._id.toString(), userId, {
+          storageKey: updatedSession.storageKey,
+          size: assembleResult.size,
+          checksum: assembleResult.checksum,
+          mimeType: updatedSession.mimeType,
+          name: updatedSession.fileName,
+        });
+        file = targetFile;
+      } else {
+        // Create new File record in MongoDB and create initial version v1
+        file = await File.create({
+          name: updatedSession.fileName,
+          ownerId: updatedSession.userId,
+          folderId: updatedSession.folderId,
+          storageKey: updatedSession.storageKey,
+          size: assembleResult.size,
+          mimeType: updatedSession.mimeType,
+          checksum: assembleResult.checksum,
+        });
+
+        try {
+          await versionService.createInitialVersion(file, userId);
+        } catch (verErr) {
+          logger.warn({ fileId: file._id, err: verErr }, 'Initial version creation notice for chunked upload');
+        }
+      }
 
       await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'COMPLETED' } });
 
