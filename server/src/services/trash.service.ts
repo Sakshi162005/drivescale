@@ -266,6 +266,20 @@ export class TrashService {
     // Resolve name collisions in the target destination
     const finalName = await this.getAvailableFileName(file.ownerId, targetFolderId, file.name);
 
+    // Validate storage quota before restoring
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+    }
+    const currentUsed = user.storageUsed || 0;
+    const currentReserved = user.storageReserved || 0;
+    if (currentUsed + currentReserved + file.size > user.storageQuota) {
+      throw new BadRequestError(
+        'Storage quota exceeded. Please free up space before restoring this file.',
+        'STORAGE_QUOTA_EXCEEDED'
+      );
+    }
+
     // Update file document
     file.isDeleted = false;
     file.deletedAt = null;
@@ -289,6 +303,7 @@ export class TrashService {
     await cacheService.del(CacheKeys.fileDetail(userId, fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(userId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
     await cacheService.del(CacheKeys.userStorageStats(userId));
 
     return { file, restoredLocationName };
@@ -341,6 +356,26 @@ export class TrashService {
     // Resolve name collision in target parent folder
     const finalName = await this.getAvailableFolderName(folder.ownerId, targetParentId, folder.name);
 
+    // 0. Pre-calculate total size of descendant files to validate storage quota
+    const descendantFiles = await File.find({
+      ownerId: folder.ownerId,
+      deletedWithFolderId: folder._id,
+    });
+    const totalRestoredSize = descendantFiles.reduce((acc, f) => acc + f.size, 0);
+
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+    }
+    const currentUsed = user.storageUsed || 0;
+    const currentReserved = user.storageReserved || 0;
+    if (currentUsed + currentReserved + totalRestoredSize > user.storageQuota) {
+      throw new BadRequestError(
+        'Storage quota exceeded. Please free up space before restoring this folder.',
+        'STORAGE_QUOTA_EXCEEDED'
+      );
+    }
+
     // 1. Restore the root folder
     folder.isDeleted = false;
     folder.deletedAt = null;
@@ -364,13 +399,6 @@ export class TrashService {
     );
 
     // 3. Restore all descendant files that were deleted with this folder
-    const descendantFiles = await File.find({
-      ownerId: folder.ownerId,
-      deletedWithFolderId: folder._id,
-    });
-
-    const totalRestoredSize = descendantFiles.reduce((acc, f) => acc + f.size, 0);
-
     await File.updateMany(
       { ownerId: folder.ownerId, deletedWithFolderId: folder._id },
       {
@@ -404,6 +432,8 @@ export class TrashService {
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(userId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
     await cacheService.del(CacheKeys.userStorageStats(userId));
 
     return {
@@ -499,6 +529,7 @@ export class TrashService {
     await cacheService.delByPattern(CacheKeys.fileAllVersionsPattern(fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(userId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
   }
 
   /**
@@ -574,6 +605,7 @@ export class TrashService {
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(userId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
   }
 
   /**

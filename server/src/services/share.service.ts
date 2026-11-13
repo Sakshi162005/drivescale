@@ -150,6 +150,7 @@ export class ShareService {
     await cacheService.delByPattern(CacheKeys.userAllSharesPattern(recipient._id.toString()));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(recipient._id.toString()));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(recipient._id.toString()));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(recipient._id.toString()));
 
     // Populate recipient info before returning
     await share.populate('recipientId', '_id name email');
@@ -203,6 +204,7 @@ export class ShareService {
     await cacheService.delByPattern(CacheKeys.userAllSharesPattern(share.recipientId.toString()));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(share.recipientId.toString()));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(share.recipientId.toString()));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(share.recipientId.toString()));
 
     await share.populate('recipientId', '_id name email');
     return share;
@@ -234,6 +236,7 @@ export class ShareService {
     await cacheService.delByPattern(CacheKeys.userAllSharesPattern(recipientId));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(recipientId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(recipientId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(recipientId));
   }
 
   /**

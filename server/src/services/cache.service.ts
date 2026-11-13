@@ -173,6 +173,22 @@ export const CacheKeys = {
   userAllTrashPattern: (userId: string) =>
     `drivescale:user:${userId}:trash:*`,
 
+  // User search results
+  searchResults: (
+    userId: string,
+    type: string,
+    q: string,
+    page = 1,
+    limit = 20,
+    sortBy = 'updatedAt',
+    sortOrder = 'desc'
+  ) =>
+    `drivescale:user:${userId}:search:${type}:${Buffer.from(q).toString('hex')}:p${page}_l${limit}_s${sortBy}_o${sortOrder}`,
+
+  // Pattern matcher for user's search queries
+  userAllSearchPattern: (userId: string) =>
+    `drivescale:user:${userId}:search:*`,
+
   // Pattern matchers for user-scoped invalidation
   userAllFoldersPattern: (userId: string) =>
     `drivescale:user:${userId}:folder:*`,

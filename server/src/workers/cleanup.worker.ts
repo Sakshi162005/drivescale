@@ -4,6 +4,7 @@ import { createBullMQConnection } from '../config/redis.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { UploadSession } from '../models/UploadSession.js';
+import { User } from '../models/User.js';
 import { storageService } from '../services/storage/index.js';
 import { trashService } from '../services/trash.service.js';
 import {
@@ -58,6 +59,22 @@ export const processCleanupJob = async (job: Job) => {
         );
 
         if (session) {
+          if (session.reservedBytes && session.reservedBytes > 0) {
+            try {
+              await User.findByIdAndUpdate(session.userId, {
+                $inc: { storageReserved: -session.reservedBytes },
+              });
+              await UploadSession.findByIdAndUpdate(session._id, {
+                $set: { reservedBytes: 0 },
+              });
+            } catch (quotaErr) {
+              logger.warn(
+                { uploadId: session._id, err: quotaErr instanceof Error ? quotaErr.message : 'Unknown' },
+                'Failed to release quota reservation for expired session'
+              );
+            }
+          }
+
           try {
             await storageService.deleteChunks(session._id.toString());
             cleanedCount++;

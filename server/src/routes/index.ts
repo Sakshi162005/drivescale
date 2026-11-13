@@ -7,6 +7,8 @@ import { fileRoutes } from './file.routes.js';
 import { uploadRoutes } from './upload.routes.js';
 import { shareRoutes } from './share.routes.js';
 import { trashRoutes } from './trash.routes.js';
+import { searchRoutes } from './search.routes.js';
+import { storageRoutes } from './storage.routes.js';
 
 const router = Router();
 
@@ -33,5 +35,9 @@ router.use('/shares', shareRoutes);
 
 // Phase 10: Trash & Recovery routes
 router.use('/trash', trashRoutes);
+
+// Phase 11: Search & Storage Quotas routes
+router.use('/search', searchRoutes);
+router.use('/storage', storageRoutes);
 
 export const apiV1Routes = router;

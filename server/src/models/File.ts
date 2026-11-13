@@ -113,6 +113,12 @@ fileSchema.index({ ownerId: 1, folderId: 1, isDeleted: 1 });
 // Compound index for unique check of active file name within same folder
 fileSchema.index({ ownerId: 1, folderId: 1, name: 1, isDeleted: 1 });
 
+// Compound index for active file name search by owner
+fileSchema.index({ ownerId: 1, isDeleted: 1, name: 1 });
+
+// Index for active shared file search
+fileSchema.index({ isDeleted: 1, name: 1 });
+
 // Compound index for querying user's top-level trashed files
 fileSchema.index({ ownerId: 1, isDeleted: 1, deletedWithFolderId: 1, deletedAt: -1 });
 

@@ -40,6 +40,8 @@ import { FileItem } from '../types/file.types.js';
 import { ActiveUploadMetadata } from '../types/upload.types.js';
 import { ShareModal } from '../components/sharing/ShareModal.js';
 import { VersionHistoryModal } from '../components/version/VersionHistoryModal.js';
+import { StorageUsageIndicator } from '../components/storage/StorageUsageIndicator.js';
+import { SearchResultsModal } from '../components/search/SearchResultsModal.js';
 
 export const Drive: React.FC = () => {
   const { folderId: routeFolderId } = useParams<{ folderId?: string }>();
@@ -124,6 +126,9 @@ export const Drive: React.FC = () => {
 
   // Version history state
   const [fileForVersionHistory, setFileForVersionHistory] = useState<FileItem | null>(null);
+
+  // Search modal state
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   // Authentication check
   useEffect(() => {
@@ -540,24 +545,25 @@ export const Drive: React.FC = () => {
           </Link>
 
           {user && (
-            <div className="user-menu">
-              <div className="user-badge">
-                <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
-                <div>
-                  <div className="user-name">{user.name}</div>
-                  <div className="user-email">
-                    {formatBytes(user.storageUsed || 0)} used of {formatBytes(user.storageQuota || 10737418240)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <StorageUsageIndicator compact />
+              <div className="user-menu">
+                <div className="user-badge">
+                  <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
+                  <div>
+                    <div className="user-name">{user.name}</div>
+                    <div className="user-email">{user.email}</div>
                   </div>
                 </div>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => logout()}
+                  title="Sign Out"
+                >
+                  <LogOut size={16} />
+                  Sign Out
+                </button>
               </div>
-              <button
-                className="btn btn-secondary"
-                onClick={() => logout()}
-                title="Sign Out"
-              >
-                <LogOut size={16} />
-                Sign Out
-              </button>
             </div>
           )}
         </div>
@@ -596,15 +602,41 @@ export const Drive: React.FC = () => {
 
         {/* Toolbar Actions */}
         <div className="drive-actions">
-          <div className="drive-search">
+          <div className="drive-search" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <Search size={16} className="search-icon" />
             <input
               type="text"
-              placeholder="Search in folder..."
+              placeholder="Filter folder (Enter for global search)..."
               className="search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setIsSearchModalOpen(true);
+                }
+              }}
+              style={{ paddingRight: '5.5rem' }}
             />
+            <button
+              onClick={() => setIsSearchModalOpen(true)}
+              title="Search across all files and folders in Drive"
+              style={{
+                position: 'absolute',
+                right: '5px',
+                background: 'rgba(99, 102, 241, 0.18)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: '6px',
+                padding: '0.2rem 0.5rem',
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                color: 'var(--accent-cyan, #06B6D4)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <span>Global</span>
+            </button>
           </div>
 
           <div className="view-toggle">
@@ -1625,6 +1657,15 @@ export const Drive: React.FC = () => {
             loadFolderData();
             initAuth();
           }}
+        />
+      )}
+
+      {/* Search Results Modal */}
+      {isSearchModalOpen && (
+        <SearchResultsModal
+          isOpen={isSearchModalOpen}
+          onClose={() => setIsSearchModalOpen(false)}
+          initialQuery={searchQuery}
         />
       )}
     </div>

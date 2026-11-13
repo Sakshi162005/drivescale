@@ -120,18 +120,25 @@ export class UploadService {
       }
     }
 
-    // Check user storage quota
+    // Check user storage quota (accounting for active storage and active reservations)
     const user = await User.findById(userId);
     if (!user) {
       throw new NotFoundError('User not found', 'USER_NOT_FOUND');
     }
 
-    if (user.storageUsed + input.totalSize > user.storageQuota) {
+    const currentUsed = user.storageUsed || 0;
+    const currentReserved = user.storageReserved || 0;
+    if (currentUsed + currentReserved + input.totalSize > user.storageQuota) {
       throw new BadRequestError(
         'Storage quota exceeded. Please free up space before uploading.',
         'STORAGE_QUOTA_EXCEEDED'
       );
     }
+
+    // Atomically reserve quota for this upload session
+    await User.findByIdAndUpdate(userId, {
+      $inc: { storageReserved: input.totalSize },
+    });
 
     const chunkSize = input.chunkSize || DEFAULT_CHUNK_SIZE;
     const totalChunks = input.totalSize === 0 ? 1 : Math.ceil(input.totalSize / chunkSize);
@@ -150,6 +157,7 @@ export class UploadService {
       totalChunks,
       uploadedChunks: [],
       storageKey,
+      reservedBytes: input.totalSize,
       status: 'PENDING',
       expiresAt,
     });
@@ -403,8 +411,14 @@ export class UploadService {
     }
 
     try {
-      // Increment user storage quota
-      await User.findByIdAndUpdate(userId, { $inc: { storageUsed: assembleResult.size } });
+      const reservedToRelease = updatedSession.reservedBytes || 0;
+      // Increment user storage used and atomically release reserved quota
+      await User.findByIdAndUpdate(userId, {
+        $inc: {
+          storageUsed: assembleResult.size,
+          storageReserved: -reservedToRelease,
+        },
+      });
 
       let file: IFile;
       if (updatedSession.replaceFileId) {
@@ -441,12 +455,15 @@ export class UploadService {
         }
       }
 
-      await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'COMPLETED' } });
+      await UploadSession.findByIdAndUpdate(uploadId, {
+        $set: { status: 'COMPLETED', reservedBytes: 0 },
+      });
 
       logger.info({ fileId: file._id, uploadId, size: file.size }, 'Chunked upload completed successfully');
 
-      // Invalidate file cache listings and user storage statistics
+      // Invalidate file cache listings, search cache, and user storage statistics
       await cacheService.delByPattern(CacheKeys.userAllFilesPattern(userId));
+      await cacheService.delByPattern(CacheKeys.userAllSearchPattern(userId));
       await cacheService.del(CacheKeys.userStorageStats(userId));
 
       // Asynchronously enqueue thumbnail generation in background (non-blocking)
@@ -474,7 +491,13 @@ export class UploadService {
     } catch (dbError) {
       // Rollback assembled file and storage allocation on DB error
       await this.storage.delete(updatedSession.storageKey);
-      await User.findByIdAndUpdate(userId, { $inc: { storageUsed: -assembleResult.size } });
+      const reservedToRelease = updatedSession.reservedBytes || 0;
+      await User.findByIdAndUpdate(userId, {
+        $inc: {
+          storageUsed: -assembleResult.size,
+          storageReserved: reservedToRelease,
+        },
+      });
       await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'FAILED' } });
       throw dbError;
     }
@@ -605,8 +628,17 @@ export class UploadService {
       return; // Idempotent
     }
 
+    const reservedToRelease = session.reservedBytes || 0;
     session.status = 'CANCELLED';
+    session.reservedBytes = 0;
     await session.save();
+
+    if (reservedToRelease > 0) {
+      await User.findByIdAndUpdate(session.userId, {
+        $inc: { storageReserved: -reservedToRelease },
+      });
+      await cacheService.del(CacheKeys.userStorageStats(userId));
+    }
 
     await this.storage.deleteChunks(uploadId);
     logger.info({ uploadId, userId }, 'Upload session cancelled and temporary chunks deleted');

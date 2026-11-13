@@ -15,7 +15,6 @@ import {
   LogIn,
   UserPlus,
   LogOut,
-  HardDrive,
   Folder as FolderIcon,
   Trash2,
 } from 'lucide-react';
@@ -25,6 +24,7 @@ import { Register } from './pages/Register.js';
 import { Drive } from './pages/Drive.js';
 import { Shared } from './pages/Shared.js';
 import { Trash } from './pages/Trash.js';
+import { StorageUsageIndicator } from './components/storage/StorageUsageIndicator.js';
 
 interface HealthResponse {
   success: boolean;
@@ -93,14 +93,6 @@ const Dashboard: React.FC = () => {
     if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
     if (mins > 0) return `${mins}m ${secs}s`;
     return `${secs}s`;
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const dbStatus = health?.data?.services?.database?.status || 'disconnected';
@@ -175,26 +167,8 @@ const Dashboard: React.FC = () => {
               and rotating refresh tokens.
             </p>
 
-            <div style={{ maxWidth: '400px', marginTop: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <HardDrive size={14} /> Storage Usage
-                </span>
-                <span>{formatBytes(user.storageUsed || 0)} / {formatBytes(user.storageQuota || 10737418240)}</span>
-              </div>
-              <div className="storage-bar-wrapper">
-                <div className="storage-bar-bg">
-                  <div
-                    className="storage-bar-fill"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.round(((user.storageUsed || 0) / (user.storageQuota || 10737418240)) * 100)
-                      )}%`,
-                    }}
-                  />
-                </div>
-              </div>
+            <div style={{ maxWidth: '440px', marginTop: '0.75rem' }}>
+              <StorageUsageIndicator />
             </div>
           </>
         ) : (
@@ -419,6 +393,13 @@ const Dashboard: React.FC = () => {
             <div>
               <p className="phase-item-title">Phase 10: Trash & Recovery</p>
               <p className="phase-item-sub">Soft delete, cascade, restoration, auto-cleanup</p>
+            </div>
+            <span className="badge-tag active">Implemented</span>
+          </div>
+          <div className="phase-item active">
+            <div>
+              <p className="phase-item-title">Phase 11: Search & Storage Quotas</p>
+              <p className="phase-item-sub">Global indexed search & atomic quota reservation</p>
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>

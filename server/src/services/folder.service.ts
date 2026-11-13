@@ -72,6 +72,7 @@ export class FolderService {
     await cacheService.del(CacheKeys.folderChildren(ownerId, input.parentId || 'root'));
     await cacheService.del(CacheKeys.folderTree(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
 
     return folder;
   }
@@ -214,6 +215,7 @@ export class FolderService {
     await cacheService.del(CacheKeys.folderChildren(ownerId, folder.parentId ? folder.parentId.toString() : 'root'));
     await cacheService.del(CacheKeys.folderTree(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
 
     return folder;
   }
@@ -331,13 +333,14 @@ export class FolderService {
       'Folder and descendants deleted successfully'
     );
 
-    // Invalidate folder, file listing, storage stats, and trash caches
+    // Invalidate folder, file listing, storage stats, trash, and search caches
     await cacheService.del(CacheKeys.folderDetail(ownerId, folderId));
     await cacheService.del(CacheKeys.folderChildren(ownerId, folder.parentId ? folder.parentId.toString() : 'root'));
     await cacheService.del(CacheKeys.folderTree(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
     await cacheService.del(CacheKeys.userStorageStats(ownerId));
   }
 
@@ -431,6 +434,7 @@ export class FolderService {
     await cacheService.del(CacheKeys.folderChildren(ownerId, targetParentStr || 'root'));
     await cacheService.del(CacheKeys.folderTree(ownerId));
     await cacheService.delByPattern(CacheKeys.userAllFoldersPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
 
     return folder;
   }

@@ -404,7 +404,49 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 11 — Search and Storage Quotas
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Search Engine (`GET /api/v1/search`)**:
+  - Global, case-insensitive partial substring search across files and folders with regex escaping to prevent ReDoS/regex injection.
+  - Query parameters: `q` (search string), `type` (`all`, `file`, `folder`), `page`, `limit` (max 100), `folderId` (scoped search), `mimeType`, `sortBy` (`name`, `size`, `createdAt`, `updatedAt`), `sortOrder` (`asc`, `desc`).
+  - Strict exclusion of soft-deleted items (`isDeleted: false`).
+  - Authorization & Sharing integration: authenticated users discover their own items or items shared with them (direct file shares, direct folder shares, and recursively inherited subfolder items resolved via breadth-first search).
+  - High performance batch resolution: zero N+1 queries. Resolves folder locations (`locationName`) and owner metadata in two batch `$in` operations.
+  - Redis caching: search results cached with a 60-second TTL keyed by user ID, type, sanitized query, pagination, and sorting; invalidated on file/folder upload, rename, move, delete, restore, or share change.
+- **Compound Search Indexes**:
+  - `File` model: compound indexes `{ ownerId: 1, isDeleted: 1, name: 1 }` and `{ isDeleted: 1, name: 1 }`.
+  - `Folder` model: compound indexes `{ ownerId: 1, isDeleted: 1, name: 1 }` and `{ isDeleted: 1, name: 1 }`.
+- **Storage Quota & Accounting Architecture**:
+  - Default quota: `DEFAULT_STORAGE_QUOTA_BYTES` (default 10 GB) configured via environment variable with Zod validation.
+  - User model additions: `storageReserved` (default 0, min 0) alongside `storageUsed` and `storageQuota`.
+  - Atomic quota reservation: `UploadSession` records `reservedBytes`. When `initUpload` runs, it verifies `storageUsed + storageReserved + totalSize <= storageQuota` and atomically increments `storageReserved`. Prevents concurrent upload over-allocation race conditions.
+  - Lifecycle conversions: Upon upload completion, `storageReserved` is decremented and `storageUsed` is incremented. On cancel, failure, or background cleanup expiration, `storageReserved` is safely decremented.
+  - Quota verification on restore: `restoreFile` and `restoreFolder` enforce that restoring deleted files won't exceed user quota, returning `400 STORAGE_QUOTA_EXCEEDED` if space is insufficient.
+  - Authoritative endpoints: `GET /api/v1/storage/usage` and `GET /api/v1/users/me/storage` returning `storageUsed`, `storageReserved`, `storageQuota`, `storageRemaining`, `percentageUsed`.
+  - Quota update endpoint: `PATCH /api/v1/storage/quota` and `PATCH /api/v1/users/me/quota` with Zod validation.
+- **Frontend Components & Integration**:
+  - `client/src/types/search.types.ts`: `SearchResultItem`, `SearchPaginationMeta`, `PaginatedSearchResponse`, `SearchOptions`.
+  - `client/src/types/storage.types.ts`: `StorageUsageStats`, `UpdateStorageQuotaInput`.
+  - `client/src/services/search.service.ts` & `client/src/services/storage.service.ts`.
+  - `client/src/components/storage/StorageUsageIndicator.tsx`: Visual progress bar with threshold color shifts (normal cyan/purple, warning amber at 80%, danger red at 95%), formatted bytes, remaining bytes, and reserved upload indicator.
+  - `client/src/components/search/SearchResultsModal.tsx`: Global search modal with real-time debounced search, type filter tabs ("All Items", "Files", "Folders"), location breadcrumb badges, direct download button, and pagination.
+  - `client/src/pages/Drive.tsx`: Integrated `StorageUsageIndicator compact` in header and "Global Search" trigger in toolbar.
+  - `client/src/App.tsx`: Replaced manual storage bar with `StorageUsageIndicator` and marked Phase 11 as `Implemented` in the roadmap.
+
+### Endpoints
+- `GET /api/v1/search`: Global paginated search across user-accessible files and folders.
+- `GET /api/v1/storage/usage`: Storage stats for authenticated user (`storageUsed`, `storageReserved`, `storageQuota`, `storageRemaining`, `percentageUsed`).
+- `PATCH /api/v1/storage/quota`: Update storage quota with validation.
+- `GET /api/v1/users/me/storage`: Consistent storage stats under user namespace.
+- `PATCH /api/v1/users/me/quota`: Consistent quota update under user namespace.
+
+### Verification
+- 16 automated tests in `server/tests/search-quota.test.ts` covering unauthenticated search rejection, empty query handling, case-insensitive partial file search, case-insensitive partial folder search, multi-resource `type=all` search with pagination, soft-deleted exclusion, shared resource discovery without leaking other users' data, storage usage reporting, quota updates with validation, upload quota rejection, concurrent upload reservation, cancellation release, and restore quota rejection.
+- Full workspace test suite: 208 passed tests across 13 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 12 — MinIO
 Status: NOT STARTED

@@ -74,6 +74,12 @@ const folderSchema = new Schema<IFolder>(
 // Compound index for querying active folders by owner and parent
 folderSchema.index({ ownerId: 1, parentId: 1, isDeleted: 1 });
 
+// Compound index for active folder name search by owner
+folderSchema.index({ ownerId: 1, isDeleted: 1, name: 1 });
+
+// Index for active shared folder search
+folderSchema.index({ isDeleted: 1, name: 1 });
+
 // Compound index for querying user's top-level trashed folders
 folderSchema.index({ ownerId: 1, isDeleted: 1, deletedWithFolderId: 1, deletedAt: -1 });
 

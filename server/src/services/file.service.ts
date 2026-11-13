@@ -98,7 +98,9 @@ export class FileService {
       if (!user) {
         await cleanupAndThrow(new NotFoundError('User not found', 'USER_NOT_FOUND'));
       }
-      if (user!.storageUsed + size > user!.storageQuota) {
+      const currentUsed = user!.storageUsed || 0;
+      const currentReserved = user!.storageReserved || 0;
+      if (currentUsed + currentReserved + size > user!.storageQuota) {
         await cleanupAndThrow(
           new BadRequestError('Storage quota exceeded. Please free up space before uploading.', 'STORAGE_QUOTA_EXCEEDED')
         );
@@ -118,6 +120,7 @@ export class FileService {
         logger.info({ fileId: targetFile!._id, ownerId, size, storageKey }, 'File replacement uploaded successfully');
 
         await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+        await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
         await cacheService.del(CacheKeys.userStorageStats(ownerId));
 
         enqueueThumbnailGeneration({
@@ -180,7 +183,9 @@ export class FileService {
       await cleanupAndThrow(new NotFoundError('User not found', 'USER_NOT_FOUND'));
     }
 
-    if (user!.storageUsed + size > user!.storageQuota) {
+    const currentUsed = user!.storageUsed || 0;
+    const currentReserved = user!.storageReserved || 0;
+    if (currentUsed + currentReserved + size > user!.storageQuota) {
       await cleanupAndThrow(
         new BadRequestError('Storage quota exceeded. Please free up space before uploading.', 'STORAGE_QUOTA_EXCEEDED')
       );
@@ -209,8 +214,9 @@ export class FileService {
 
       logger.info({ fileId: file._id, ownerId, size, storageKey }, 'File uploaded successfully');
 
-      // Invalidate file listings and storage stats cache
+      // Invalidate file listings, search cache, and storage stats cache
       await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+      await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
       await cacheService.del(CacheKeys.userStorageStats(ownerId));
 
       // Asynchronously enqueue thumbnail generation in background (non-blocking)
@@ -414,6 +420,7 @@ export class FileService {
     // Invalidate file cache and listings
     await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
 
     return file;
   }
@@ -496,6 +503,7 @@ export class FileService {
     // Invalidate file cache and listings
     await cacheService.del(CacheKeys.fileDetail(ownerId, fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(ownerId));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(ownerId));
 
     return file;
   }
@@ -540,6 +548,7 @@ export class FileService {
     await cacheService.del(CacheKeys.fileDetail(file.ownerId.toString(), fileId));
     await cacheService.delByPattern(CacheKeys.userAllFilesPattern(file.ownerId.toString()));
     await cacheService.delByPattern(CacheKeys.userAllTrashPattern(file.ownerId.toString()));
+    await cacheService.delByPattern(CacheKeys.userAllSearchPattern(file.ownerId.toString()));
     await cacheService.del(CacheKeys.userStorageStats(file.ownerId.toString()));
   }
 }

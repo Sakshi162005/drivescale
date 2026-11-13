@@ -27,6 +27,7 @@ export interface IUploadSession extends Document {
   totalChunks: number;
   uploadedChunks: IUploadedChunk[];
   storageKey: string;
+  reservedBytes?: number;
   status: UploadSessionStatus;
   expiresAt: Date;
   createdAt: Date;
@@ -98,6 +99,11 @@ const uploadSessionSchema = new Schema<IUploadSession>(
       required: true,
       unique: true,
       index: true,
+    },
+    reservedBytes: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     status: {
       type: String,

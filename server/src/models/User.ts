@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { env } from '../config/env.js';
 
 export interface IUser extends Document {
   name: string;
@@ -7,6 +8,7 @@ export interface IUser extends Document {
   avatar?: string;
   storageQuota: number;
   storageUsed: number;
+  storageReserved: number;
   role: 'user' | 'admin';
   isVerified: boolean;
   isActive: boolean;
@@ -42,11 +44,18 @@ const userSchema = new Schema<IUser>(
     },
     storageQuota: {
       type: Number,
-      default: 10 * 1024 * 1024 * 1024, // 10 GB default
+      default: () => env.DEFAULT_STORAGE_QUOTA_BYTES,
+      min: 0,
     },
     storageUsed: {
       type: Number,
       default: 0,
+      min: 0,
+    },
+    storageReserved: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     role: {
       type: String,
