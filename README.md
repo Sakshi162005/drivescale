@@ -163,6 +163,55 @@ Expected output:
 
 ---
 
+## Production Deployment with Docker Compose
+
+DriveScale is fully containerized and production-hardened. The entire multi-tier stack runs with a single command via Docker Compose behind an Nginx reverse proxy.
+
+### 1. Architecture Components
+
+- **`nginx`**: Public ingress reverse proxy (`http://localhost:80`). Routes `/api/v1` requests directly to Express with streaming upload/download support (`proxy_request_buffering off; proxy_buffering off;`), handles SPA fallback for the React frontend, and applies hardened security headers.
+- **`client`**: Multi-stage build of React + Vite SPA, served via an optimized Nginx container on internal port `80`.
+- **`server`**: Production Express + Node.js API server running on internal port `5000` with non-root security (`USER node`), connection draining, and graceful shutdown handling.
+- **`worker`**: Background worker process executing BullMQ queue jobs (thumbnail generation, trash cleanup, session expiration) with automated heartbeat monitoring (`worker-health.js`).
+- **`mongodb`**: Document metadata store with healthcheck probe and persistent volume (`mongodb_data`).
+- **`redis`**: Cache, distributed rate limiter, and BullMQ queue message broker with AOF persistence (`redis_data`).
+- **`minio`**: Self-hosted S3-compatible object store with persistent volume (`minio_data`) and optional administrative web console (`http://localhost:9001`).
+
+### 2. Running in Production Mode
+
+```bash
+# Build and start all 7 production services
+docker compose up -d --build
+```
+
+### 3. Verify Health & Production Endpoints
+
+```bash
+# Nginx public proxy health check
+curl http://localhost/nginx-health
+
+# API process liveness probe
+curl http://localhost/api/v1/health/live
+
+# API readiness probe (verifies database readiness)
+curl http://localhost/api/v1/health/ready
+
+# Full system health report
+curl http://localhost/api/v1/health
+```
+
+### 4. Stopping the Application Gracefully
+
+```bash
+# Gracefully stop all containers
+docker compose stop
+
+# Stop and remove containers while preserving persistent volumes
+docker compose down
+```
+
+---
+
 ## Testing & Quality Assurance
 
 ```bash

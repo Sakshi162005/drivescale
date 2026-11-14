@@ -102,3 +102,18 @@ export async function initStorage(client: Client = minioClient): Promise<boolean
   logger.info('MinIO object storage initialized and ready');
   return true;
 }
+
+/**
+ * Returns the current health status of the storage backend for health checks
+ */
+export async function getStorageStatus(client: Client = minioClient): Promise<string> {
+  if (env.STORAGE_DRIVER === 'local') {
+    return 'connected';
+  }
+  try {
+    const exists = await client.bucketExists(env.MINIO_BUCKET);
+    return exists ? 'connected' : 'degraded';
+  } catch {
+    return 'disconnected';
+  }
+}

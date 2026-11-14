@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
 import { initStorage } from './config/storage.js';
@@ -47,7 +50,7 @@ export const startWorkerProcess = async (): Promise<void> => {
     const fileWorker = createFileWorker();
     const notificationWorker = createNotificationWorker();
 
-    // 4. Schedule periodic repeatable cleanup job for expired upload sessions and expired trash
+    // 5. Schedule periodic repeatable cleanup job for expired upload sessions and expired trash
     const cleanupQueue = getCleanupQueue();
     await cleanupQueue.upsertJobScheduler(
       'periodic-expired-upload-cleanup',
@@ -72,6 +75,25 @@ export const startWorkerProcess = async (): Promise<void> => {
       }
     );
 
+    // 6. Start heartbeat file writes for container health checks
+    const heartbeatPath =
+      process.env.WORKER_HEARTBEAT_FILE ||
+      path.join(os.tmpdir(), 'drivescale-worker-heartbeat');
+    const updateHeartbeat = () => {
+      try {
+        fs.writeFileSync(
+          heartbeatPath,
+          JSON.stringify({ timestamp: Date.now(), status: 'healthy' }),
+          'utf-8'
+        );
+      } catch (err) {
+        logger.warn({ err }, 'Failed to write worker heartbeat file');
+      }
+    };
+    updateHeartbeat();
+    const heartbeatInterval = setInterval(updateHeartbeat, 10000);
+    heartbeatInterval.unref();
+
     logger.info(
       {
         concurrency: env.BULLMQ_CONCURRENCY,
@@ -81,14 +103,28 @@ export const startWorkerProcess = async (): Promise<void> => {
       'DriveScale Background Worker process is online and ready for jobs'
     );
 
-    // 5. Register graceful shutdown handlers
+    // 7. Register graceful shutdown handlers
     const shutdown = async (signal: string) => {
       if (isShuttingDown) return;
       isShuttingDown = true;
 
       logger.info({ signal }, 'Worker process received shutdown signal. Closing workers...');
 
+      // Force exit timeout
+      const forceExitTimeout = setTimeout(() => {
+        logger.error('Worker shutdown timeout reached (10s). Forcing exit.');
+        process.exit(1);
+      }, 10000);
+      forceExitTimeout.unref();
+
       try {
+        clearInterval(heartbeatInterval);
+        try {
+          if (fs.existsSync(heartbeatPath)) fs.unlinkSync(heartbeatPath);
+        } catch {
+          // Ignore cleanup error
+        }
+
         await Promise.allSettled([
           closeCleanupWorker(),
           closeFileWorker(),
@@ -104,6 +140,7 @@ export const startWorkerProcess = async (): Promise<void> => {
         await disconnectRedis();
         await disconnectDatabase();
 
+        clearTimeout(forceExitTimeout);
         logger.info('Background Worker process exited cleanly');
         process.exit(0);
       } catch (err) {

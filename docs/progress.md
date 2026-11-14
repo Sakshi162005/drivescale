@@ -489,7 +489,54 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 13 — Production Hardening
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Production Containerization**:
+  - Implemented multi-stage, production-ready Dockerfiles for all application services:
+    - `docker/client/Dockerfile`: Multi-stage build with `node:20-alpine` compiling React + Vite, served by `nginx:1.27-alpine` with gzip compression and SPA client routing fallback (`docker/client/nginx.conf`).
+    - `docker/server/Dockerfile`: Multi-stage build with native build tools, unprivileged execution (`USER node`), production dependencies only, liveness health check, and direct signal-handling exec form (`node dist/server.js`).
+    - `docker/worker/Dockerfile`: Multi-stage build for the background BullMQ worker with non-root security (`USER node`) and heartbeat health probe.
+- **Nginx Ingress Reverse Proxy (`docker/nginx/nginx.conf`)**:
+  - Acts as the unified public HTTP gateway on port 80.
+  - Proxies `/api/v1/` to `server:5000` and all other paths to `client:80`.
+  - Zero-buffering upload and download configuration: `proxy_request_buffering off;` and `proxy_buffering off;` ensure streaming large files directly between clients and backend storage without proxy disk spooling.
+  - Hardened security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`.
+  - Upstream keepalive pools, timeouts (`300s`), and dedicated `/nginx-health` verification probe.
+- **Production Docker Compose (`docker-compose.yml`)**:
+  - Orchestrates all 7 services: `nginx`, `client`, `server`, `worker`, `mongodb`, `redis`, and `minio`.
+  - Service-to-service internal networking via `drivescale-network`.
+  - Database, Redis, and MinIO S3 API ports are kept internal to the Docker network for defense-in-depth.
+  - Healthcheck-driven dependency ordering with `condition: service_healthy`.
+  - Persistent volume safety: `mongodb_data`, `redis_data` (AOF persistence enabled), and `minio_data`.
+  - Validated with `docker compose config`.
+- **Health Checks (Liveness, Readiness, Component Status)**:
+  - `GET /api/v1/health/live`: Fast process liveness probe returning 200 OK (`{ status: 'alive' }`).
+  - `GET /api/v1/health/ready`: Readiness probe verifying database connectivity before accepting traffic (returns 503 if primary DB is unavailable).
+  - `GET /api/v1/health`: Full component status reporting MongoDB, Redis, and MinIO storage statuses.
+  - Worker Heartbeat: Background worker writes periodic heartbeat timestamp (`/tmp/drivescale-worker-heartbeat`); verified via `server/src/worker-health.ts` without external dependencies.
+- **Graceful Shutdown & Resilience**:
+  - Both `server.ts` and `worker.ts` handle `SIGTERM` and `SIGINT` signals.
+  - Connection draining on HTTP server (`server.close()`, `closeIdleConnections()`).
+  - Safe closure of BullMQ workers and queues (`fileQueue`, `cleanupQueue`, `notificationQueue`).
+  - Disconnects Redis and MongoDB cleanly.
+  - Guarded against duplicate signal execution with a bounded 10-second forced exit safety timer (`.unref()`).
+- **Structured Logging & Redaction**:
+  - Pino logger outputs structured JSON in production with standard ISO timestamps.
+  - Built-in redaction (`REDACTED_PATHS`) automatically censors sensitive fields: `password`, `passwordHash`, `authorization`, `token`, `accessToken`, `refreshToken`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `MINIO_SECRET_KEY`, `MINIO_ACCESS_KEY`.
+  - Contextual request tracking: Generates and propagates `X-Request-Id` across requests and logs.
+- **Production Environment Validation & Security**:
+  - Zod environment schema (`server/src/config/env.ts`): Rejects default development JWT secrets in production (`NODE_ENV === 'production'`), enforces 32+ character minimum length, and requires distinct access/refresh secrets.
+  - Origin whitelisting: `ALLOWED_ORIGINS` parsed and validated with credentials support.
+  - Centralized error handler sanitizes internal 500 error messages and prevents stack trace leakage in production.
+
+### Verification
+- 15 automated tests in `server/tests/production-hardening.test.ts` covering environment validation, secret length & distinction checks, development secret rejection, liveness `/live`, readiness `/ready`, full health check, `X-Request-Id` generation and propagation, Helmet security headers, CORS preflight and credentials handling, Pino redaction paths, and worker heartbeat freshness.
+- Full workspace test suite: 244 passed tests across 15 test suites with 0 failures and 0 regressions.
+- Docker Compose configuration validated cleanly with `docker compose config`.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client (Vite bundle) and server (tsc).
 
 ## Phase 14 — Testing
 Status: NOT STARTED

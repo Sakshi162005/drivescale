@@ -410,6 +410,13 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
+          <div className="phase-item active">
+            <div>
+              <p className="phase-item-title">Phase 13: Production Hardening</p>
+              <p className="phase-item-sub">Docker, Nginx reverse proxy, health checks & security</p>
+            </div>
+            <span className="badge-tag active">Implemented</span>
+          </div>
         </div>
       </section>
 
