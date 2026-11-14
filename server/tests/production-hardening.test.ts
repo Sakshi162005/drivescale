@@ -8,7 +8,7 @@ import { parseEnv, DEV_DEFAULT_ACCESS_SECRET, DEV_DEFAULT_REFRESH_SECRET } from 
 import * as databaseModule from '../src/config/database.js';
 import * as redisModule from '../src/config/redis.js';
 import * as storageModule from '../src/config/storage.js';
-import { logger, REDACTED_PATHS } from '../src/utils/logger.js';
+import { REDACTED_PATHS } from '../src/utils/logger.js';
 
 describe('Phase 13: Production Hardening Test Suite', () => {
   const app = createApp();
@@ -44,6 +44,16 @@ describe('Phase 13: Production Hardening Test Suite', () => {
       };
 
       expect(() => parseEnv(invalidEnv)).toThrow(/default development access secret/);
+    });
+
+    it('rejects production configuration when using default development refresh secret', () => {
+      const invalidEnv = {
+        NODE_ENV: 'production',
+        JWT_ACCESS_SECRET: 'production-access-secret-minimum-32-characters!',
+        JWT_REFRESH_SECRET: DEV_DEFAULT_REFRESH_SECRET,
+      };
+
+      expect(() => parseEnv(invalidEnv)).toThrow(/default development refresh secret/);
     });
 
     it('rejects production configuration when secrets are too short (< 32 chars)', () => {
