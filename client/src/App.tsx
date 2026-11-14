@@ -403,12 +403,12 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="badge-tag active">Implemented</span>
           </div>
-          <div className="phase-item">
+          <div className="phase-item active">
             <div>
               <p className="phase-item-title">Phase 12: MinIO Storage</p>
               <p className="phase-item-sub">Self-hosted S3-compatible object store</p>
             </div>
-            <span className="badge-tag upcoming">Planned</span>
+            <span className="badge-tag active">Implemented</span>
           </div>
         </div>
       </section>

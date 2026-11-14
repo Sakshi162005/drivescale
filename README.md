@@ -105,6 +105,10 @@ docker compose up -d
 This starts:
 - MongoDB at `localhost:27017`
 - Redis at `localhost:6379`
+- MinIO Object Storage (S3 API) at `localhost:9000`
+- MinIO Web Console at `http://localhost:9001` (Credentials: `minioadmin` / `minioadmin`)
+
+Persistent volumes are configured for MongoDB (`mongo_data`), Redis (`redis_data`), and MinIO (`minio_data`).
 
 ### 4. Install Dependencies
 

@@ -449,7 +449,44 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 12 — MinIO
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Object Storage Integration**:
+  - Direct integration with MinIO self-hosted object storage using the official `@minio` client library (`^8.0.7`).
+  - Implemented `MinioStorageService` conforming strictly to `IStorageService`, providing complete storage abstraction.
+  - No application controller, route, or business service directly references MinIO SDK primitives or filesystem paths.
+  - Zero whole-file memory accumulation: direct uploads and downloads stream through Node.js Streams and Transform pipelines with real-time SHA-256 and byte count computation.
+- **Path Traversal & Security**:
+  - Rigorous storage key sanitization guarding against path traversal (`..`), null bytes (`\0`), and leading slashes.
+  - Server-generated sharded object keys (`objects/xx/<hash>`).
+- **Chunked & Resumable Upload Staging**:
+  - Preserves temporary on-disk chunk staging during active chunk ingestion.
+  - Sequential streaming assembly (`assembleChunks`): streams staged chunks one by one through an asynchronous generator pipeline piped directly into MinIO (`putObject`) without loading all chunks into memory.
+  - Immediate cleanup of temporary staged chunks after successful upload into MinIO.
+- **Bucket Lifecycle & Fault-Tolerant Initialization**:
+  - `ensureBucketExists` runs bounded retries with exponential backoff on startup to handle container boot delays and concurrent race conditions.
+  - Server and Worker processes initialize storage prior to accepting API requests or background jobs.
+- **Dynamic Storage Delegation**:
+  - Unified `storageService` acts as a delegating proxy forwarding to the configured active driver (`minio` or `local`), facilitating runtime swapping for unit testing.
+- **Docker Infrastructure**:
+  - Added official `minio` service to `docker-compose.yml` (`minio/minio:RELEASE.2024-08-03T04-33-23Z`) with S3 API port (9000), web console port (9001), healthcheck endpoint (`/minio/health/live`), and persistent volume `minio_data`.
+- **Environment & Configuration**:
+  - Environment variables: `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `STORAGE_DRIVER`.
+
+### Endpoints Verified with MinIO
+- `POST /api/v1/files`: Direct multipart streaming to MinIO.
+- `GET /api/v1/files/:id/download`: Direct streaming retrieval from MinIO (`getObject`).
+- `POST /api/v1/uploads/complete`: Streaming assembly of staged chunks into MinIO.
+- `DELETE /api/v1/trash/files/:id/permanent`: Object removal from MinIO bucket.
+- `DELETE /api/v1/trash/empty`: Permanent cleanup of all associated MinIO objects.
+
+### Verification
+- 21 automated unit and integration tests in `server/tests/minio-storage.test.ts` covering upload, download, metadata stat, existence checks, deletion, chunk staging and sequential streaming assembly, error handling, bucket lifecycle, bounded retry logic, and end-to-end API integration.
+- Full workspace test suite: 229 passed tests across 14 test suites with 0 failures and 0 regressions.
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client and server.
 
 ## Phase 13 — Production Hardening
 Status: NOT STARTED

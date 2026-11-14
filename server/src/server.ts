@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
+import { initStorage } from './config/storage.js';
 import { logger } from './utils/logger.js';
 import { Server } from 'http';
 
@@ -11,6 +12,7 @@ const startServer = async () => {
   // Connect infrastructure
   await connectDatabase();
   await connectRedis();
+  await initStorage();
 
   const app = createApp();
 

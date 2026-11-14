@@ -35,6 +35,20 @@ const envSchema = z.object({
   TRASH_CLEANUP_BATCH_SIZE: z.coerce.number().default(100),
   // Storage Quota configuration
   DEFAULT_STORAGE_QUOTA_BYTES: z.coerce.number().default(10 * 1024 * 1024 * 1024), // 10 GB default
+  // MinIO Object Storage configuration
+  MINIO_ENDPOINT: z.string().default('localhost'),
+  MINIO_PORT: z.coerce.number().default(9000),
+  MINIO_USE_SSL: z
+    .union([z.boolean(), z.string()])
+    .default(false)
+    .transform((val) => (typeof val === 'boolean' ? val : val === 'true' || val === '1')),
+  MINIO_ACCESS_KEY: z.string().default('minioadmin'),
+  MINIO_SECRET_KEY: z.string().default('minioadmin'),
+  MINIO_BUCKET: z.string().default('drivescale'),
+  // Storage Driver: 'minio' for self-hosted object store, 'local' for filesystem compatibility
+  STORAGE_DRIVER: z.enum(['minio', 'local']).default('minio'),
+  STORAGE_LOCAL_DIR: z.string().optional(),
+  STORAGE_CHUNKS_DIR: z.string().optional(),
   CLIENT_URL: z.string().default('http://localhost:5173'),
   LOG_LEVEL: z.string().optional().default('info'),
   JWT_ACCESS_SECRET: z.string().default('drivescale-development-access-secret-32-chars-min!'),

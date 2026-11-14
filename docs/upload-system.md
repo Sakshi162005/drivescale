@@ -44,7 +44,7 @@ Upload sessions progress through strict states:
 ### State Definitions
 - `PENDING`: Session initialized; awaiting first chunk.
 - `UPLOADING`: One or more chunks received and validated; remaining chunks pending.
-- `ASSEMBLING`: Atomic completion initiated. Stream pipeline actively concatenates chunks in numerical order into the final storage key.
+- `ASSEMBLING`: Atomic completion initiated. Stream pipeline sequentially streams chunks from temporary staging and pipes directly to MinIO object storage (`minioClient.putObject`) or local storage, calculating the final SHA-256 and byte size on the fly with constant memory usage.
 - `COMPLETED`: Assembly succeeded, SHA-256 and byte sizes verified, MongoDB `File` record created, and temporary chunk files cleaned up.
 - `EXPIRED`: 24-hour expiration threshold exceeded. Chunks can no longer be uploaded.
 - `CANCELLED`: Session manually cancelled. Temporary chunk files purged from storage.
@@ -107,3 +107,15 @@ Transient network failures during chunk upload are handled with bounded exponent
 - **Cancellation Race Guard**: `cancelUpload` checks for `ASSEMBLING` status and rejects cancellation with `409 SESSION_ASSEMBLING` to prevent deleting chunk files while assembly is in progress.
 - **Completion Inviolability**: `cancelUpload` rejects cancellation if `status === 'COMPLETED'` with `400 SESSION_ALREADY_COMPLETED`, ensuring valid files and quota are never deleted.
 - **Repeated Completion Idempotency**: Calling `/complete` on an already completed session safely returns the existing `File` record with 200/201 without re-assembling.
+
+---
+
+## 5. Storage Tier Integration & MinIO Assembly
+
+DriveScale abstracts object persistence through `IStorageService`. Chunked uploads follow a hybrid staging architecture:
+
+1. **Chunk Staging**: As individual chunks arrive via `PUT /uploads/:uploadId/chunks/:chunkNumber`, they are staged atomically in temporary on-disk chunk storage (`data/storage/chunks/<uploadId>/chunk_<n>`).
+2. **Streaming Sequential Ingestion**: When `/complete` is called, `minioStorage.assembleChunks` initializes an asynchronous generator stream that opens and drains each chunk sequentially.
+3. **Piped Object Upload**: The generator stream is piped through a cryptographic hashing `Transform` stream directly into MinIO using `minioClient.putObject(bucket, targetKey, stream)`.
+4. **Constant Memory Footprint**: At no point is the entire file or multiple chunks held concurrently in server RAM, ensuring predictable memory consumption for multi-gigabyte uploads.
+5. **Immediate Cleanup**: Once the object is committed to MinIO, the temporary chunk directory is purged.

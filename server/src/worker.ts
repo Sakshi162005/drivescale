@@ -1,5 +1,6 @@
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
+import { initStorage } from './config/storage.js';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import {
@@ -38,7 +39,10 @@ export const startWorkerProcess = async (): Promise<void> => {
       process.exit(1);
     }
 
-    // 3. Initialize BullMQ workers
+    // 3. Initialize MinIO storage
+    await initStorage();
+
+    // 4. Initialize BullMQ workers
     const cleanupWorker = createCleanupWorker();
     const fileWorker = createFileWorker();
     const notificationWorker = createNotificationWorker();

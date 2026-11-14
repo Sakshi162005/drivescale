@@ -35,8 +35,32 @@ services:
       retries: 5
       start_period: 5s
 
-  # Background Worker service (Phase 7)
-  # Connects to shared Redis and MongoDB infrastructure
+  # MinIO Object Storage service (Phase 12)
+  # Self-hosted S3-compatible storage with persistent volume and web console
+  minio:
+    image: minio/minio:RELEASE.2024-08-03T04-33-23Z
+    container_name: drivescale-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - drivescale-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Background Worker service (Phase 7 & 12)
+  # Connects to shared Redis, MongoDB, and MinIO infrastructure
   # For local development: run `npm run worker` (or `npm run worker:server`)
   # In containerized deployment:
   # worker:
@@ -49,10 +73,17 @@ services:
   #     - NODE_ENV=production
   #     - MONGODB_URI=mongodb://mongodb:27017/drivescale
   #     - REDIS_URL=redis://redis:6379
+  #     - MINIO_ENDPOINT=minio
+  #     - MINIO_PORT=9000
+  #     - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+  #     - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+  #     - MINIO_BUCKET=drivescale
   #   depends_on:
   #     mongodb:
   #       condition: service_healthy
   #     redis:
+  #       condition: service_healthy
+  #     minio:
   #       condition: service_healthy
   #   networks:
   #     - drivescale-network
@@ -61,6 +92,8 @@ volumes:
   mongodb_data:
     driver: local
   redis_data:
+    driver: local
+  minio_data:
     driver: local
 
 networks:
