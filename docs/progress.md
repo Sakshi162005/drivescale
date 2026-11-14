@@ -539,7 +539,46 @@ Status: COMPLETE
 - Production build (`npm run build`) succeeded for both client (Vite bundle) and server (tsc).
 
 ## Phase 14 — Testing
-Status: NOT STARTED
+Status: COMPLETE
+
+### Overview & Architecture
+- **Unit Test Coverage (`server/tests/unit/`)**:
+  - `auth.service.test.ts` (13 tests): Argon2id password hashing, user registration, email uniqueness conflict, login validation, deactivated user rejection, JWT access token generation, refresh token rotation, refresh token reuse detection, expiration, and session termination on logout.
+  - `permission.service.test.ts` (12 tests): Permission weight hierarchy (`VIEW` < `DOWNLOAD` < `EDIT`), share expiration checks, owner super-privileges, direct file/folder permissions, inherited folder permissions for nested files and subfolders, highest-privilege resolution across overlapping shares, unauthorized access rejection, and cycle-safe traversal guards.
+  - `upload.service.test.ts` (11 tests): Upload session initialization, atomic quota reservation, filename sanitization and path traversal prevention, storage quota exhaustion rejection, chunk storage & SHA-256 calculation, duplicate chunk idempotency, conflicting duplicate rejection, expired session rejection, sequential chunk assembly, File metadata & v1 version creation, user quota balance updates, and session cancellation cleanup.
+  - `storage.service.test.ts` (11 tests): Complete coverage for both `LocalStorageService` and `MinioStorageService`: stream-based upload and download, existence checks, metadata retrieval, idempotent deletion, missing object `NotFoundError`, path traversal rejection, temporary chunk staging, chunk physical existence, and sequential streaming assembly.
+- **Upload Edge Cases Test Suite (`server/tests/upload-edge-cases.test.ts`)**:
+  - **Case A (Missing Chunk)**: Rejects upload completion when required intermediate chunks have not been uploaded (`400 MISSING_CHUNKS`).
+  - **Case B (Duplicate Chunk Handling)**: Acknowledges identical duplicate chunks idempotently with `200 OK` (`isDuplicate: true`), and rejects conflicting duplicate chunks with `409 Conflict` (`DUPLICATE_CHUNK_CONFLICT`).
+  - **Case C (Out-of-Order Chunk Ingestion)**: Correctly accepts chunks arriving in arbitrary numerical order and reconstructs the target object in exact sequence without byte corruption.
+  - **Case D (Interrupted Upload Recovery)**: Verifies physical existence of chunks on disk, calculates sorted `missingChunks`, and preserves `UPLOADING` status so interrupted uploads resume without starting from zero.
+  - **Case E (Expired Upload Session)**: Rejects chunk uploads and completion for sessions that have passed their `expiresAt` timestamp (`400 SESSION_EXPIRED`).
+  - **Case F (Checksum Mismatch)**: Verifies chunk integrity against client checksums (`400 CHECKSUM_MISMATCH`) and validates assembled file checksum against client file checksum (`400 CHECKSUM_MISMATCH`).
+  - **Case G (Unauthorized Cross-User Upload Access)**: Enforces strict user isolation across upload endpoints; rejects unauthorized status queries, chunk uploads, completion, and cancellation (`401 FORBIDDEN`).
+- **End-to-End Integration Test Coverage**:
+  - Full end-to-end integration test suite maintained across all core subsystems:
+    - User registration, login, logout, token refresh, `/me` profile (`auth.test.ts`).
+    - Hierarchical folder creation, nested navigation, breadcrumbs, folder rename, move, delete (`folder.test.ts`).
+    - File upload, download, streaming, rename, move, delete (`file.test.ts`).
+    - Chunked uploads, concurrency, assembly (`upload.test.ts`).
+    - Resumable upload flow, interrupted upload resume, duplicate chunks (`resumable-upload.test.ts`).
+    - Redis caching, TTL, pattern invalidation, rate limiting (`redis-cache-ratelimit.test.ts`).
+    - Background jobs, BullMQ queues, worker processing, retries (`worker.test.ts`).
+    - Resource sharing, VIEW/DOWNLOAD/EDIT permissions, revocation (`share.test.ts`).
+    - File version history, new version creation, version download, restore (`version.test.ts`).
+    - Trash management, soft delete, item recovery, permanent purge (`trash.test.ts`).
+    - Search indexing, file/folder query filtering, storage quota limits & usage tracking (`search-quota.test.ts`).
+    - MinIO object storage integration, S3 client streaming, bucket lifecycle (`minio-storage.test.ts`).
+    - Production hardening, security headers, request ID, redaction, health checks (`production-hardening.test.ts`, `health.test.ts`, `health-services.test.ts`).
+- **Test Isolation & Data Safety**:
+  - All test suites run with isolated in-memory or ephemeral storage paths (`os.tmpdir()`), ensuring no production files or actual user data are affected.
+  - Redis, BullMQ, and MongoDB interactions in unit suites are mocked with deterministic behavior.
+
+### Verification
+- Full test suite: 20 passed test files with 304 passed tests, 0 failures, 0 regressions (`npm test`).
+- TypeScript checks (`npm run typecheck`) passed with 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`) succeeded for both client (Vite bundle) and server (tsc).
 
 ## Phase 15 — Documentation
 Status: NOT STARTED

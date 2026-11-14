@@ -25,6 +25,7 @@ export const uploadChunk = (req: AuthenticatedRequest, res: Response, next: Next
   }
 
   const contentType = req.headers['content-type'] || '';
+  const clientChecksum = (req.query['checksum'] as string) || (req.headers['x-checksum'] as string) || undefined;
 
   if (contentType.includes('multipart/form-data')) {
     let bb: busboy.Busboy;
@@ -40,7 +41,7 @@ export const uploadChunk = (req: AuthenticatedRequest, res: Response, next: Next
 
     bb.on('file', (_fieldname, fileStream) => {
       chunkHandled = true;
-      chunkPromise = uploadService.uploadChunk(userId, uploadId, chunkNumber, fileStream);
+      chunkPromise = uploadService.uploadChunk(userId, uploadId, chunkNumber, fileStream, clientChecksum);
       chunkPromise.catch(() => {});
     });
 
@@ -65,7 +66,7 @@ export const uploadChunk = (req: AuthenticatedRequest, res: Response, next: Next
   } else {
     // Direct stream (e.g. application/octet-stream or binary PUT)
     uploadService
-      .uploadChunk(userId, uploadId, chunkNumber, req)
+      .uploadChunk(userId, uploadId, chunkNumber, req, clientChecksum)
       .then((result) => {
         sendSuccess(res, result, 200);
       })
@@ -76,7 +77,8 @@ export const uploadChunk = (req: AuthenticatedRequest, res: Response, next: Next
 export const completeUpload = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userId = req.user!._id.toString();
   const uploadId = req.params['uploadId'] as string;
-  const file = await uploadService.completeUpload(userId, uploadId);
+  const clientChecksum = (req.body?.checksum as string) || (req.query['checksum'] as string) || undefined;
+  const file = await uploadService.completeUpload(userId, uploadId, clientChecksum);
   sendSuccess(res, { file }, 201);
 });
 

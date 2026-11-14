@@ -177,7 +177,8 @@ export class UploadService {
     userId: string,
     uploadId: string,
     chunkNumber: number,
-    stream: NodeJS.ReadableStream
+    stream: NodeJS.ReadableStream,
+    clientChecksum?: string
   ): Promise<ChunkUploadResult> {
     const drainAndThrow = (err: Error): never => {
       if (stream && 'resume' in stream && typeof stream.resume === 'function') {
@@ -254,6 +255,10 @@ export class UploadService {
       );
     }
 
+    if (typeof clientChecksum === 'string' && clientChecksum.length > 0 && checksum !== clientChecksum) {
+      throw new BadRequestError('Chunk checksum mismatch', 'CHECKSUM_MISMATCH');
+    }
+
     // Check duplicate chunk
     if (existingChunk) {
       if (existingChunk.checksum === checksum) {
@@ -307,7 +312,7 @@ export class UploadService {
   /**
    * Completes a chunked upload by assembling all chunks into the final object
    */
-  async completeUpload(userId: string, uploadId: string): Promise<IFile> {
+  async completeUpload(userId: string, uploadId: string, clientChecksum?: string): Promise<IFile> {
     if (!mongoose.Types.ObjectId.isValid(uploadId)) {
       throw new BadRequestError('Invalid upload session ID', 'INVALID_UPLOAD_ID');
     }
@@ -408,6 +413,12 @@ export class UploadService {
         `Assembled size (${assembleResult.size}) does not match expected total size (${updatedSession.totalSize})`,
         'SIZE_MISMATCH'
       );
+    }
+
+    if (typeof clientChecksum === 'string' && clientChecksum.length > 0 && assembleResult.checksum !== clientChecksum) {
+      await this.storage.delete(updatedSession.storageKey);
+      await UploadSession.findByIdAndUpdate(uploadId, { $set: { status: 'FAILED' } });
+      throw new BadRequestError('Assembled file checksum mismatch', 'CHECKSUM_MISMATCH');
     }
 
     try {
