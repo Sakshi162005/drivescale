@@ -580,5 +580,23 @@ Status: COMPLETE
 - ESLint checks (`npm run lint`) passed with 0 errors and 0 warnings across all workspaces.
 - Production build (`npm run build`) succeeded for both client (Vite bundle) and server (tsc).
 
-## Phase 15 — Documentation
-Status: NOT STARTED
+## Phase 15 — Documentation and Portfolio Preparation
+Status: COMPLETE
+
+### Overview & Architecture
+- **Root README Enhancement (`README.md`)**:
+  - Comprehensive, production-ready portfolio presentation covering Project Overview, Implemented Features (Phases 0–14), High-Level Architecture Diagram (Mermaid), Technology Stack matrix, Monorepo Structure, Step-by-Step Local Setup, Environment Variables Table, Docker Production Deployment, API Overview, Upload Subsystem Architecture, Database Architecture, UI Screenshot Catalog, Testing Instructions, and Future Roadmap.
+- **Deep-Dive Technical Documentation (`docs/`)**:
+  - **`docs/architecture.md`**: Modular monolith design philosophy, rationale for avoiding microservices, frontend component and state management architecture (React + Zustand + TanStack Query), layered backend boundaries (routes, controllers, services, repositories), storage abstraction pattern (`IStorageService`), Redis caching & distributed Lua rate limiting, BullMQ background worker architecture, production Nginx reverse proxy with zero-buffering streaming, container health checks, and graceful shutdown protocols with Mermaid diagrams.
+  - **`docs/api.md`**: Complete REST API reference for all versioned `/api/v1` routes across Health Probes, Authentication, Users & Storage Quotas, Folders, Files, Chunked & Resumable Uploads, Sharing & Permissions, File Versions, Trash & Recovery, and Search. Includes HTTP verbs, auth requirements, request payloads, response envelopes, and standard error codes.
+  - **`docs/database.md`**: In-depth MongoDB metadata architecture detailing schemas for `User`, `Folder`, `File`, `FileVersion`, `Share`, `UploadSession`, and `RefreshToken`. Details compound indexes, unique constraints, storage key references, quota reservation accounting, soft-deletion cascading, and an Entity-Relationship (ER) Mermaid diagram.
+  - **`docs/upload-system.md`**: Complete architectural breakdown of normal vs chunked vs resumable uploads, state machine transitions (`PENDING` -> `UPLOADING` -> `ASSEMBLING` -> `COMPLETED`/`FAILED`/`EXPIRED`/`CANCELLED`), client worker pool concurrency (3 workers), physical chunk verification (`chunkExists`), missing chunk detection, duplicate chunk idempotency, conflict rejection (`409`), out-of-order ingestion, exponential backoff formulas, and constant-memory streaming assembly into MinIO with a sequence diagram.
+  - **`docs/screenshots/README.md`**: Detailed UI visual asset guide outlining the 10 core views of the platform (Authentication, Dashboard, File Listings, Context Menus, Upload Tray, Resumption Banner, Sharing Modal, Version Drawer, Trash View) with step-by-step instructions for capturing genuine screenshots from running instances.
+- **Environment & Configuration Validation**:
+  - Audited `.env.example` to ensure full alignment with Zod schema in `server/src/config/env.ts` with zero sensitive credentials committed.
+
+### Verification
+- Full test suite: 20 passed test files with 304 passed tests, 0 failures (`npm test`).
+- TypeScript typecheck (`npm run typecheck`): 0 errors across all workspaces (`client` and `server`).
+- ESLint checks (`npm run lint`): 0 errors and 0 warnings across all workspaces.
+- Production build (`npm run build`): Successful Vite client bundle and server tsc build.

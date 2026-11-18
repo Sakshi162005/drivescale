@@ -2,59 +2,151 @@
 
 ## 1. Architectural Philosophy
 
-DriveScale is structured as a **modular monolith** with clear architectural boundaries between routing, controller orchestration, domain business services, repository models, and infrastructure adapters.
+DriveScale is structured as a **modular monolith** with strict boundaries between HTTP controllers, domain business services, data repositories, and infrastructure adapters.
 
-Key architectural tenets:
-* **Separation of Concerns**: Controllers remain thin, validating inputs and orchestrating service calls. Domain and business logic live strictly within services.
-* **Storage Independence**: The application does not couple domain logic to filesystem paths or MinIO SDK primitives. All object persistence operations route through a strict storage abstraction interface (`IStorageService`).
-* **Metadata vs. Bytes**: MongoDB stores metadata, authorization, folder hierarchies, and version catalogs. Object bytes reside exclusively in self-hosted MinIO object storage (or local storage adapter during testing).
-* **Zero Whole-File In-Memory Buffering**: All upload, assembly, and download operations stream bytes continuously using Node.js Streams and Transform streams to maintain predictable memory usage.
-* **Resilience & Scalability**: Redis powers rate limiting, multi-tiered caching, and background job queues via BullMQ.
-
----
-
-## 2. High-Level Component Architecture
-
-```text
-                                Internet
-                                   |
-                                   v
-                                Nginx (Reverse Proxy)
-                                /       \
-                               /         \
-                              v           v
-                        React Client     Express API
-                        (TypeScript)     (Node.js + TS)
-                                               |
-                     +-------------------------+-------------------------+
-                     |                         |                         |
-                     v                         v                         v
-                  MongoDB                    Redis                     MinIO
-              (Metadata & Auth)       (Cache, Rate Limits,       (Object Storage)
-                                           BullMQ)                       ^
-                                               |                         |
-                                               v                         |
-                                            BullMQ                       |
-                                            Worker ----------------------+
-                                      (Thumbnails, Cleanup)
+```mermaid
+flowchart TD
+    Client["React Frontend (SPA)"] -->|"HTTP / HTTPS (Port 80)"| Nginx["Nginx Ingress Reverse Proxy"]
+    Nginx -->|"/api/v1/* (Streaming, No Buffer)"| Express["Express API Server (Node.js + TS)"]
+    Nginx -->|"Static Assets & SPA Routes"| FrontendServer["Client Nginx Container"]
+    
+    Express -->|"Metadata, Auth & Versions"| Mongo[("MongoDB 7.0")]
+    Express -->|"Cache, Rate Limits & BullMQ Queues"| Redis[("Redis 7.2")]
+    Express -->|"Stream Upload / Download / Assembly"| MinIO[("MinIO Object Storage")]
+    
+    Redis -.->|"Job Dispatch"| Worker["Background Worker Process (BullMQ)"]
+    Worker -->|"Batch Purge & Retention"| Mongo
+    Worker -->|"Object Cleanup & Thumbnails"| MinIO
 ```
 
+### Why a Modular Monolith?
+DriveScale intentionally adopts a modular monolith rather than microservices for clear architectural and operational advantages:
+1. **Self-Hosted Simplicity**: The primary project goal is self-hosted deployment on standard hardware or single-node VPS instances. A modular monolith deploys as a cohesive Docker Compose stack without the overhead of service meshes, distributed tracing networks, or multi-cluster orchestration.
+2. **Zero Network Latency Between Domain Boundaries**: Cross-cutting features—such as authorization checking during file moves, quota reconciliation during upload assembly, and version snapshot creation—execute in-process with nanosecond latency rather than multi-hop RPC calls.
+3. **Transaction Safety Without Distributed Sagas**: User quota reservation and upload session completion leverage MongoDB atomic document updates and atomic Redis Lua scripts without needing two-phase commits or complex saga compensating mechanisms.
+4. **Shared Type System**: Full TypeScript monorepo ensures that schemas, DTOs, and interface contracts are shared end-to-end between client and server workspaces, eliminating payload drift.
+
 ---
 
-## 3. Storage Subsystem & Abstraction
+## 2. High-Level Component Overview
 
-### Interface: `IStorageService`
-All file storage interactions adhere to `IStorageService`:
+| Component | Technology | Primary Responsibility |
+|---|---|---|
+| **Public Gateway** | Nginx 1.27 Alpine | Ingress reverse proxy, SSL termination ready, streaming zero-buffering proxy, static asset delivery, security headers. |
+| **Frontend Client** | React 18/19, TypeScript, Vite | User interface, state management, 3-worker concurrent chunked upload orchestration, resumable upload recovery. |
+| **API Server** | Node.js 20, Express, TypeScript | REST API endpoints, JWT authentication, permission verification, quota management, stream pipelines. |
+| **Metadata Database** | MongoDB 7.0 (Mongoose) | User accounts, folder hierarchies, file metadata, version logs, permissions, active upload sessions. |
+| **Cache & Queue Broker** | Redis 7.2 (ioredis) | Multi-tiered cache-aside layer, distributed atomic rate limiting, BullMQ job queue broker. |
+| **Object Storage** | MinIO RELEASE.2024 (S3 API) | Scalable, self-hosted object storage holding raw file bytes under server-generated keys. |
+| **Background Worker** | BullMQ, Node.js 20 | Asynchronous job execution (thumbnail generation, expired session cleanup, 30-day trash retention purge). |
+
+---
+
+## 3. Frontend Architecture
+
+The frontend application (`client/`) is built with **React**, **TypeScript**, and **Vite**, organized into feature-driven modules:
+
+```text
+client/src/
+├── components/
+│   ├── ui/               # Reusable primitives (Buttons, Modals, Inputs, Badges, Dropdowns)
+│   ├── layout/           # Navbar, Sidebar, Breadcrumb navigation, Layout wrapper
+│   ├── file/             # FileTable, FileGrid, FileCard, FileContextMenu, FileDetailModal
+│   ├── folder/           # FolderTree, FolderCard, CreateFolderModal, MoveFolderModal
+│   ├── upload/           # UploadDropzone, UploadProgressTray, IncompleteUploadBanner
+│   ├── sharing/          # ShareModal, ShareUserList, PermissionBadge
+│   └── version/          # VersionHistoryDrawer, VersionItem, VersionRestoreModal
+├── pages/                # Route targets (Login, Register, Drive, Shared, Recent, Trash, Settings)
+├── hooks/                # Custom React hooks (useAuth, useDrive, useUpload, useDebounce)
+├── services/             # Axios API clients (auth, file, folder, upload, share, version, trash)
+├── stores/               # Zustand stores for reactive client state
+│   ├── auth.store.ts     # User profile, access token, authentication status
+│   ├── upload.store.ts   # Active upload progress, worker status, cancellation tokens
+│   └── ui.store.ts       # Sidebar collapse, active view mode (grid vs table), theme
+└── types/                # TypeScript interface definitions shared across client components
+```
+
+### State Management Strategy
+1. **Server Cache State (TanStack Query)**:
+   - Manages asynchronous remote data: folder contents, search results, trash items, share permissions, storage statistics.
+   - Configured with automatic background refetching and targeted cache key invalidation on mutations (e.g. creating a folder immediately invalidates `['folders', parentId, 'children']`).
+2. **Client Interaction State (Zustand)**:
+   - Lightweight, unopinionated reactive stores for local UI state: selection sets, active modals, floating upload tray visibility, and authentication tokens.
+3. **Form Handling & Validation (React Hook Form + Zod)**:
+   - Performant, uncontrolled form inputs with schema-based validation for login, registration, and sharing dialogs.
+
+---
+
+## 4. Backend Architecture & Request Flow
+
+The backend (`server/`) follows clean layered architecture principles where each layer has a single, strictly defined responsibility:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Proxy as Nginx Gateway
+    participant RateLimit as RateLimiter (Redis Lua)
+    participant Auth as Auth Middleware (JWT)
+    participant Ctrl as File Controller
+    participant Perm as Permission Service
+    participant FileSvc as File Service
+    participant Storage as Storage Service (MinIO)
+    participant DB as MongoDB
+
+    Client->>Proxy: GET /api/v1/files/:id/download
+    Proxy->>RateLimit: Forward Request
+    RateLimit->>RateLimit: Evaluate User Rate Window
+    RateLimit->>Auth: Pass (Rate OK)
+    Auth->>Auth: Verify JWT Bearer Token
+    Auth->>Ctrl: Attach Authenticated User
+    Ctrl->>Perm: canDownload(userId, fileId)
+    Perm->>DB: Check Ownership & Share Grants
+    DB-->>Perm: Grant Verified (DOWNLOAD)
+    Perm-->>Ctrl: Authorized
+    Ctrl->>FileSvc: getFileDownloadStream(fileId)
+    FileSvc->>DB: Query File Metadata & storageKey
+    DB-->>FileSvc: Metadata (storageKey: "objects/ab/...")
+    FileSvc->>Storage: createReadStream(storageKey)
+    Storage-->>FileSvc: Readable Stream from MinIO
+    FileSvc-->>Ctrl: Readable Stream
+    Ctrl-->>Proxy: Pipe Stream with Content-Disposition
+    Proxy-->>Client: Stream Bytes to Browser (Zero Buffer)
+```
+
+### Layer Responsibilities
+1. **Routes (`routes/*.routes.ts`)**:
+   - Versioned mount point under `/api/v1`.
+   - Binds HTTP verbs and URI paths to controller actions.
+   - Applies endpoint-specific middleware (validation, custom rate limits).
+2. **Controllers (`controllers/*.controller.ts`)**:
+   - Thin layer that extracts request parameters, headers, query parameters, and validated bodies.
+   - Invokes domain services.
+   - Formats responses using standardized JSON helpers (`sendSuccess`, `sendError`).
+3. **Services (`services/*.service.ts`)**:
+   - Encapsulates all business logic, workflow sequencing, and security rules.
+   - Verifies authorization via `PermissionService` before any mutation.
+   - Interacts with data repositories and external infrastructure (MinIO, Redis, BullMQ).
+4. **Storage Service (`services/storage/`)**:
+   - Decouples domain logic from MinIO S3 SDK primitives and filesystem paths through the `IStorageService` interface.
+5. **Models (`models/*.ts`)**:
+   - Defines Mongoose schemas with compound indexes, field validation, and soft-deletion flags.
+
+---
+
+## 5. Storage Subsystem & Abstraction
+
+All file storage operations must conform to the `IStorageService` abstraction:
 
 ```typescript
 export interface IStorageService {
-  upload(key: string, stream: Readable, size?: number, contentType?: string): Promise<{ size: number; checksum: string }>;
+  upload(key: string, stream: NodeJS.ReadableStream, size?: number, contentType?: string): Promise<{ size: number; checksum: string }>;
   download(key: string): Promise<Buffer>;
-  createReadStream(key: string): Promise<Readable>;
+  createReadStream(key: string): Promise<NodeJS.ReadableStream>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
   getMetadata(key: string): Promise<StorageMetadata>;
-  saveChunk(uploadId: string, chunkNumber: number, chunkStream: Readable): Promise<{ size: number; checksum: string }>;
+  saveChunk(uploadId: string, chunkNumber: number, chunkStream: NodeJS.ReadableStream, expectedChecksum?: string): Promise<{ size: number; checksum: string }>;
   chunkExists(uploadId: string, chunkNumber: number): Promise<boolean>;
   deleteChunks(uploadId: string): Promise<void>;
   assembleChunks(uploadId: string, totalChunks: number, targetKey: string): Promise<{ size: number; checksum: string }>;
@@ -63,91 +155,108 @@ export interface IStorageService {
 
 ### Implementations
 1. **`MinioStorageService`** (Default / Production):
-   - Direct integration with MinIO S3 API via official `@minio` SDK.
-   - Generates and enforces storage keys with two-level prefix sharding (`objects/xx/<hash>`).
-   - Strict path traversal prevention: rejects keys with `..`, null bytes, or leading slashes.
-   - Calculates on-the-fly SHA-256 and byte sizes during streaming uploads.
-   - Uses an async generator stream (`Readable.from(streamChunks())`) to assemble staged chunks directly into MinIO with constant memory consumption.
+   - Implements S3-compatible object storage via the official `@minio` client.
+   - Uses server-generated storage keys with two-level prefix sharding (`objects/3a/3a8f...`) to prevent filesystem hot-spotting.
+   - Strict path traversal defense: rejects any key containing `..`, null bytes (`\0`), or leading slashes.
+   - Sequential assembly pipeline: streams temporary on-disk chunks sequentially into MinIO using an async generator without loading whole files into memory.
 2. **`LocalStorageService`** (Fallback / Test Driver):
-   - Stores objects in `data/storage/` on the local filesystem.
-   - Useful for lightweight development environments where Docker services are not running.
-
-### Dynamic Storage Delegation
-The exported `storageService` instance is a delegating proxy to the active underlying storage driver (`minio` or `local`), configured via `STORAGE_DRIVER` and switchable at runtime via `setStorageService(...)` for unit testing.
+   - Directly streams files into a designated local directory (`data/storage/`).
+   - Used for zero-dependency local testing and test isolation.
 
 ---
 
-## 4. Cache & Rate Limiting (Redis)
+## 6. Redis Caching & Distributed Rate Limiting
 
-- **Caching Layer**: Cache-aside pattern for folder listings, file details, trash queries, storage usage stats, and search queries with TTLs between 30 and 300 seconds. Granular invalidation triggers on mutation.
-- **Distributed Rate Limiting**:
-  - `auth`: 5 requests / minute / IP
-  - `upload-init`: 20 requests / minute / user
-  - `upload-chunk`: 120 requests / minute / user
-  - `general`: 100 requests / minute / user / IP
-- **Fallback**: Graceful fallback to local in-memory stores if Redis is temporarily unreachable.
+### A. Caching Architecture
+- **Strategy**: Cache-aside with automatic invalidation.
+- **Namespaced Keys**: `drivescale:user:<userId>:folders:<id>:children`, `drivescale:user:<userId>:storage:stats`.
+- **Zero File Byte Caching**: Only non-sensitive metadata and directory structures are cached. Raw file bytes and access tokens are never cached in Redis.
+- **Resilience**: If Redis is offline, cache reads return `null` and gracefully fall back to MongoDB without throwing errors or interrupting requests.
 
----
-
-## 5. Background Workers (BullMQ)
-
-The worker process (`server/src/worker.ts`) operates independently from the main API process, processing jobs across dedicated queues:
-- **`file-queue`**: Image thumbnail generation and metadata extraction.
-- **`cleanup-queue`**: Purging expired upload sessions, orphaned chunks, and soft-deleted files past retention periods.
-- **`notification-queue`**: Asynchronous notification dispatch for file shares.
-
----
-
-## 6. Security & Authorization
-
-- **Authentication**: Stateless JWT access tokens (15m expiry) paired with rotating refresh tokens stored in MongoDB with Argon2id password hashing.
-- **Authorization (`PermissionService`)**: Centralized access evaluation checking ownership, direct file sharing, direct folder sharing, and inherited nested folder permissions (`VIEW`, `DOWNLOAD`, `EDIT`).
-- **HTTP Protection**: Helmet HTTP security headers, CORS origin restrictions, and Zod schema validation across all request params, bodies, and queries.
-- **Structured Logging Redaction**: Pino structured JSON logger with automated redaction of sensitive credentials (`authorization`, `password`, `refreshToken`, `JWT_ACCESS_SECRET`, `MINIO_SECRET_KEY`).
-- **Request Tracing**: Automated `X-Request-Id` header generation and context propagation across all HTTP requests.
+### B. Distributed Rate Limiting
+- **Atomic Lua Script**:
+  ```lua
+  local current = redis.call('INCR', KEYS[1])
+  if current == 1 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  end
+  local ttl = redis.call('PTTL', KEYS[1])
+  return {current, ttl}
+  ```
+- **Windows and Limits**:
+  - `authRateLimiter`: 10 requests / minute per client IP.
+  - `uploadInitRateLimiter`: 20 sessions / minute per user ID.
+  - `chunkUploadRateLimiter`: 120 chunks / minute per user ID.
+  - `generalRateLimiter`: 100 requests / minute globally per user/IP (health check probes are explicitly skipped).
+- **Fail-Safe Memory Fallback**: If Redis connectivity drops, the rate limiter falls back to an in-memory sliding window bucket per instance, preventing service disruption while maintaining defense against DoS attacks.
 
 ---
 
-## 7. Production Containerization & Ingress
+## 7. Background Worker Architecture (BullMQ)
 
-### A. Nginx Reverse Proxy (`docker/nginx/nginx.conf`)
-- Acts as the single public gateway on port 80.
-- Routes `/api/v1/` to backend Express container (`server:5000`) and `/` to frontend SPA container (`client:80`).
-- **Zero-Buffering Streaming**:
-  - `proxy_request_buffering off;`: Ensures large multi-part and chunked uploads stream directly into the Node.js application process without Nginx spooling entire gigabyte files to disk.
-  - `proxy_buffering off;`: Enables real-time streaming downloads directly to the client browser without intermediate proxy buffering.
-- **Resilience**: `proxy_connect_timeout 60s`, `proxy_read_timeout 300s`, and `client_max_body_size 500M`.
-- **Security Headers**: Enforces `X-Content-Type-Options nosniff`, `X-Frame-Options SAMEORIGIN`, `Referrer-Policy strict-origin-when-cross-origin`, and `Permissions-Policy`.
+Non-critical and compute-intensive operations are offloaded to BullMQ queues powered by Redis:
 
-### B. Multi-Stage Dockerfiles
-- **Client (`docker/client/Dockerfile`)**: Multi-stage build with `node:20-alpine` compiling React via Vite, served via `nginx:1.27-alpine` with gzip compression and SPA route fallback.
-- **Server (`docker/server/Dockerfile`)**: Multi-stage build with native build tools, compiled TypeScript, unprivileged non-root execution (`USER node`), and container liveness probe.
-- **Worker (`docker/worker/Dockerfile`)**: Multi-stage build running `dist/worker.js` with non-root security and heartbeat health check.
+```text
+Express API Server
+       │
+       ▼
+ ┌────────────── BullMQ Producer Queues ─────────────┐
+ │  • file-queue         (thumbnail generation)      │
+ │  • cleanup-queue      (expired sessions & trash)  │
+ │  • notification-queue (share activity events)     │
+ └───────────────────────┬───────────────────────────┘
+                         │ (Redis Streams)
+                         ▼
+             BullMQ Worker Process
+               (server/src/worker.ts)
+                         │
+      ┌──────────────────┼──────────────────┐
+      ▼                  ▼                  ▼
+File Worker        Cleanup Worker     Notification Worker
+• Sharp resize     • 24h upload purge • Share email alerts
+• Preview commit   • 30d trash purge  • Push notifications
+```
 
----
-
-## 8. Health Check Architecture & Probes
-
-| Probe / Endpoint | Target | Purpose | Success Condition |
-|---|---|---|---|
-| `GET /nginx-health` | Nginx Proxy | Ingress health | 200 OK |
-| `GET /api/v1/health/live` | Express API | Process liveness | 200 OK (`{ status: 'alive' }`) |
-| `GET /api/v1/health/ready` | Express API | Service readiness | 200 OK (Database connected) / 503 (Unavailable) |
-| `GET /api/v1/health` | Express API | Full component report | 200 OK with `database`, `redis`, `storage` statuses |
-| `node dist/worker-health.js` | Worker Container | Worker process health | Fresh heartbeat file (`< 30s` old) |
-| `mongosh db.adminCommand('ping')` | MongoDB Container | Database availability | MongoDB responds to ping |
-| `redis-cli ping` | Redis Container | Redis availability | Redis responds with PONG |
-| `curl /minio/health/live` | MinIO Container | Object storage availability | MinIO returns 200 |
+- **Process Isolation**: The worker runs as an independent OS process or Docker container, ensuring heavy image manipulation or batch deletions never degrade API latency.
+- **Heartbeat & Liveness**: The worker writes periodic timestamp heartbeats to `/tmp/drivescale-worker-heartbeat`, verified by container health check probes via `worker-health.ts`.
+- **Idempotency**: All jobs are idempotent and safe to retry on failure.
 
 ---
 
-## 9. Graceful Shutdown Protocol
+## 8. Production Containerization & Deployment
 
-Both the API server (`server.ts`) and background worker (`worker.ts`) handle `SIGTERM` and `SIGINT`:
-1. **Draining**: The HTTP server halts acceptance of incoming requests and closes idle keep-alive connections while allowing active in-flight requests to complete.
-2. **Worker & Queue Pause**: BullMQ workers stop accepting new jobs and active worker jobs are allowed to complete.
-3. **Queue Disconnection**: Producer queues (`file-queue`, `cleanup-queue`, `notification-queue`) are cleanly closed.
-4. **Infrastructure Teardown**: Redis and MongoDB connections are gracefully disconnected.
-5. **Bounded Timeout**: A 10-second unref'd timer (`setTimeout(..., 10000).unref()`) prevents hanging processes from holding container stops indefinitely.
+DriveScale deploys as a multi-container Docker Compose application configured with defense-in-depth networking:
 
+```mermaid
+graph TB
+    subgraph Public Internet
+        Browser["User Browser"]
+    end
 
+    subgraph "Docker Host (drivescale-network)"
+        Nginx["Nginx Reverse Proxy (:80)"]
+        ClientContainer["Client Container (React Static)"]
+        ServerContainer["Server API Container (Express :5000)"]
+        WorkerContainer["Background Worker Container"]
+        
+        subgraph Internal Data Tier
+            MongoContainer[("MongoDB 7.0 (:27017)")]
+            RedisContainer[("Redis 7.2 (:6379)")]
+            MinioContainer[("MinIO Object Store (:9000, :9001)")]
+        end
+    end
+
+    Browser -->|"Port 80"| Nginx
+    Browser -.->|"Optional Port 9001"| MinioContainer
+    Nginx -->|"Static /"| ClientContainer
+    Nginx -->|"/api/v1/*"| ServerContainer
+    ServerContainer --> MongoContainer
+    ServerContainer --> RedisContainer
+    ServerContainer --> MinioContainer
+    WorkerContainer --> MongoContainer
+    WorkerContainer --> RedisContainer
+    WorkerContainer --> MinioContainer
+```
+
+### Zero-Buffering Streaming Configuration
+Nginx is explicitly configured with `proxy_request_buffering off;` and `proxy_buffering off;`. This allows multi-gigabyte uploads and downloads to stream uninterrupted directly between the user's browser and MinIO through the Node.js stream pipeline without intermediate proxy disk spooling.
