@@ -103,6 +103,8 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-drivescale}
       - STORAGE_DRIVER=minio
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-drivescale-production-access-secret-32-chars-min!}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-drivescale-production-refresh-secret-32-chars-min!}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     depends_on:
       mongodb:
@@ -178,7 +180,7 @@ services:
     networks:
       - drivescale-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
